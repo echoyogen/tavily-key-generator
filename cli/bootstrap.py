@@ -16,6 +16,9 @@ def _ensure_venv():
     if not os.path.exists(venv_dir):
         print("创建虚拟环境...")
         subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
+        # Python 3.12+ venv 默认不含 pip，需手动引导
+        venv_python = _get_venv_python(venv_dir)
+        subprocess.check_call([venv_python, "-m", "ensurepip", "--upgrade"])
         print("✅ 虚拟环境创建完成\n")
 
     # 重新启动脚本在虚拟环境中
@@ -61,6 +64,11 @@ def _ensure_deps():
 
     if missing:
         print(f"正在安装依赖: {', '.join(missing)}...")
+        # 兜底：确保 pip 可用（Python 3.12+ venv 可能不含 pip）
+        try:
+            import pip  # noqa: F401
+        except ImportError:
+            subprocess.check_call([sys.executable, "-m", "ensurepip", "--upgrade"])
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "-q"])
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file, "-q"])
         print("✅ 依赖安装完成\n")
