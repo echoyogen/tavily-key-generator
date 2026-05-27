@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import cli.bootstrap as bootstrap
+
 
 def _import_run_with_stubbed_check_call():
     commands = []
@@ -40,32 +42,26 @@ class RunBootstrapTests(unittest.TestCase):
         self.assertEqual(browser_commands, [])
 
     def test_ensure_service_browsers_only_uses_camoufox_for_exa(self) -> None:
-        run, _ = _import_run_with_stubbed_check_call()
-
         with (
-            patch.object(run, "_ensure_camoufox_browser") as ensure_camoufox,
-            patch.object(run, "_ensure_patchright_browser") as ensure_patchright,
+            patch.object(bootstrap, "_ensure_camoufox_browser") as ensure_camoufox,
+            patch.object(bootstrap, "_ensure_patchright_browser") as ensure_patchright,
         ):
-            run._ensure_service_browsers("exa")
+            bootstrap._ensure_service_browsers("exa")
 
         ensure_camoufox.assert_called_once_with()
         ensure_patchright.assert_not_called()
 
     def test_ensure_service_browsers_uses_patchright_for_tavily(self) -> None:
-        run, _ = _import_run_with_stubbed_check_call()
-
         with (
-            patch.object(run, "_ensure_camoufox_browser") as ensure_camoufox,
-            patch.object(run, "_ensure_patchright_browser") as ensure_patchright,
+            patch.object(bootstrap, "_ensure_camoufox_browser") as ensure_camoufox,
+            patch.object(bootstrap, "_ensure_patchright_browser") as ensure_patchright,
         ):
-            run._ensure_service_browsers("tavily")
+            bootstrap._ensure_service_browsers("tavily")
 
         ensure_camoufox.assert_called_once_with()
         ensure_patchright.assert_called_once_with()
 
     def test_camoufox_browser_ready_uses_cli_path(self) -> None:
-        run, _ = _import_run_with_stubbed_check_call()
-
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "camoufox").write_text("ok", encoding="utf-8")
             completed = subprocess.CompletedProcess(
@@ -75,14 +71,12 @@ class RunBootstrapTests(unittest.TestCase):
                 stderr="",
             )
 
-            with patch.object(run.subprocess, "run", return_value=completed) as mock_run:
-                self.assertTrue(run._camoufox_browser_ready())
+            with patch.object(bootstrap.subprocess, "run", return_value=completed) as mock_run:
+                self.assertTrue(bootstrap._camoufox_browser_ready())
 
         mock_run.assert_called_once()
 
     def test_camoufox_browser_ready_accepts_file_path(self) -> None:
-        run, _ = _import_run_with_stubbed_check_call()
-
         with tempfile.TemporaryDirectory() as temp_dir:
             binary_path = Path(temp_dir, "camoufox-bin")
             binary_path.write_text("ok", encoding="utf-8")
@@ -93,12 +87,10 @@ class RunBootstrapTests(unittest.TestCase):
                 stderr="",
             )
 
-            with patch.object(run.subprocess, "run", return_value=completed):
-                self.assertTrue(run._camoufox_browser_ready())
+            with patch.object(bootstrap.subprocess, "run", return_value=completed):
+                self.assertTrue(bootstrap._camoufox_browser_ready())
 
     def test_patchright_browser_ready_uses_expected_install_location(self) -> None:
-        run, _ = _import_run_with_stubbed_check_call()
-
         with tempfile.TemporaryDirectory() as temp_dir:
             expected_path = Path(temp_dir, "chromium-1208")
             expected_path.mkdir()
@@ -113,14 +105,12 @@ Chrome for Testing 145.0.7632.6 (playwright chromium v1208)
                 stderr="",
             )
 
-            with patch.object(run.subprocess, "run", return_value=completed) as mock_run:
-                self.assertTrue(run._patchright_browser_ready())
+            with patch.object(bootstrap.subprocess, "run", return_value=completed) as mock_run:
+                self.assertTrue(bootstrap._patchright_browser_ready())
 
         mock_run.assert_called_once()
 
     def test_patchright_browser_ready_ignores_unrelated_installs(self) -> None:
-        run, _ = _import_run_with_stubbed_check_call()
-
         with tempfile.TemporaryDirectory() as temp_dir:
             unrelated_root = Path(temp_dir, "cache")
             unrelated_root.mkdir()
@@ -137,14 +127,12 @@ Chrome for Testing 145.0.7632.6 (playwright chromium v9999)
             )
 
             with (
-                patch.object(run.subprocess, "run", return_value=completed),
-                patch.object(run, "_default_patchright_browser_root", return_value=str(unrelated_root)),
+                patch.object(bootstrap.subprocess, "run", return_value=completed),
+                patch.object(bootstrap, "_default_patchright_browser_root", return_value=str(unrelated_root)),
             ):
-                self.assertFalse(run._patchright_browser_ready())
+                self.assertFalse(bootstrap._patchright_browser_ready())
 
     def test_patchright_browser_ready_falls_back_to_cache_dir(self) -> None:
-        run, _ = _import_run_with_stubbed_check_call()
-
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "chromium-1208").mkdir()
             completed = subprocess.CompletedProcess(
@@ -155,10 +143,10 @@ Chrome for Testing 145.0.7632.6 (playwright chromium v9999)
             )
 
             with (
-                patch.object(run.subprocess, "run", return_value=completed),
-                patch.object(run, "_default_patchright_browser_root", return_value=temp_dir),
+                patch.object(bootstrap.subprocess, "run", return_value=completed),
+                patch.object(bootstrap, "_default_patchright_browser_root", return_value=temp_dir),
             ):
-                self.assertTrue(run._patchright_browser_ready())
+                self.assertTrue(bootstrap._patchright_browser_ready())
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from config import (
     EMAIL_CODE_TIMEOUT,
     LOCAL_SOLVER_URL,
 )
-from mail_provider import get_email_code
+from mail.factory import get_provider as _get_mail_provider
 from services.base import BaseService
 from services.common.api_verifier import verify_api_key as _verify_key
 from services.common.browser import extract_api_key_by_pattern, fill_first_input
@@ -525,7 +525,7 @@ class TavilyService(BaseService):
 
         if page.query_selector('input[name="code"]'):
             print("Reached email verification code page")
-            code = get_email_code(email, timeout=EMAIL_CODE_TIMEOUT)
+            code = _get_mail_provider().get_email_code(email, timeout=EMAIL_CODE_TIMEOUT, service_hint="tavily")
             if not code:
                 return
 
@@ -560,8 +560,7 @@ class TavilyService(BaseService):
             return
 
         print("Email verification required")
-        from mail_provider import get_verification_link
-        verify_url = get_verification_link(email, timeout=60)
+        verify_url = _get_mail_provider().get_verification_link(email, timeout=60)
         if not verify_url:
             return
 
