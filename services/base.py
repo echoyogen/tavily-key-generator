@@ -82,4 +82,12 @@ class BaseService(ABC):
                 f.write(f"{email},{password},{api_key}\n")
 
     def _open_browser(self):
-        return Camoufox(headless=self._get_headless_setting())
+        from proxy_manager import get_proxy_dict
+        proxy = get_proxy_dict()
+        kwargs = {"headless": self._get_headless_setting()}
+        if proxy:
+            kwargs["proxy"] = proxy
+            kwargs["geoip"] = config.PROXY_GEOIP
+            server = proxy.get("server", "")
+            print(f"Using proxy: {server}")
+        return Camoufox(**kwargs)
