@@ -1,4 +1,18 @@
-_REGISTRY = {}
+from services.tavily.service import TavilyService
+from services.firecrawl.service import FirecrawlService
+from services.exa.service import ExaService
+from services.you.service import YouService
+from services.serper.service import SerperService
+from services.valyu.service import ValyuService
+
+_REGISTRY = {
+    "tavily": TavilyService,
+    "firecrawl": FirecrawlService,
+    "exa": ExaService,
+    "you": YouService,
+    "serper": SerperService,
+    "valyu": ValyuService,
+}
 
 
 def register_service(name, service_class):
