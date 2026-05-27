@@ -9,7 +9,6 @@ import time
 import requests as std_requests
 from camoufox.sync_api import Camoufox
 from config import (
-    API_KEY_TIMEOUT,
     EMAIL_CODE_TIMEOUT,
     VALYU_REGISTER_HEADLESS,
 )
