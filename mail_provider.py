@@ -32,7 +32,7 @@ _DUCKMAIL_DOMAIN_PRIORITY = (
 _DUCKMAIL_DOMAIN_CACHE = None
 _DUCKMAIL_MAILBOX_CACHE = {}
 _SELECTED_DOMAIN = ""
-_SUPPORTED_SERVICES = ("tavily", "firecrawl", "exa")
+_SUPPORTED_SERVICES = ("tavily", "firecrawl", "exa", "you", "serper", "valyu")
 
 
 def rand_str(n=8):
@@ -76,6 +76,12 @@ def _username_prefix(service):
         return "fc"
     if service == "exa":
         return "exa"
+    if service == "you":
+        return "you"
+    if service == "serper":
+        return "serper"
+    if service == "valyu":
+        return "valyu"
     return "tavily"
 
 
@@ -160,7 +166,7 @@ def _extract_verification_link(message):
     ]
 
     primary_link_hints = ("verif", "confirm", "magic", "auth", "callback", "signin", "signup")
-    primary_host_hints = ("tavily", "firecrawl", "clerk", "stytch", "auth", "login")
+    primary_host_hints = ("tavily", "firecrawl", "clerk", "stytch", "auth", "login", "serper", "supabase")
     for url in urls:
         lowered = url.lower()
         if any(token in lowered for token in primary_link_hints) and any(host in lowered for host in primary_host_hints):
@@ -199,6 +205,22 @@ def _extract_email_code(message, service="tavily"):
             )
             if match:
                 return match.group(1)
+    elif service == "you":
+        if "you.com" not in combined and "youmail" not in combined and "sign in" not in combined:
+            return None
+        for source in (text, content):
+            match = re.search(
+                r"verification code(?:\s+is)?[^0-9]*(\d{6})",
+                source,
+                re.IGNORECASE,
+            )
+            if match:
+                return match.group(1)
+        for source in (text, content):
+            match = re.search(r"\b(\d{6})\b", source)
+            if match:
+                return match.group(1)
+        return None
     else:
         if "verify your identity" not in subject and "verify" not in subject and "tavily" not in combined:
             return None
