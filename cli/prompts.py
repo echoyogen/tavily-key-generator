@@ -19,7 +19,7 @@ from config import (
     ONLINEMAIL_API_KEY,
     ONLINEMAIL_ORDERS_FILE,
 )
-from mail_provider import get_active_domain, get_configured_domains, set_selected_domain
+from mail.factory import get_active_domain, get_configured_domains, set_domain
 
 
 def prompt_service_choice():
@@ -76,7 +76,7 @@ def prompt_domain_choice():
         return
 
     if len(domains) == 1:
-        set_selected_domain(domains[0])
+        set_domain(domains[0])
         print(f"📮 当前域名: {domains[0]}")
         return
 
@@ -96,7 +96,7 @@ def prompt_domain_choice():
             continue
 
         selected = domains[choice - 1]
-        set_selected_domain(selected)
+        set_domain(selected)
         print(f"📮 已选择域名: {selected}")
         return
 

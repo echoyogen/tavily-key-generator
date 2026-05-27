@@ -20,5 +20,28 @@ class PlaceholderConfigTests(unittest.TestCase):
         self.assertFalse(is_placeholder_env_value("SERVER_ADMIN_PASSWORD", "Jelly120425"))
 
 
+class MailFactoryTests(unittest.TestCase):
+    def test_selected_domain_is_module_level(self):
+        import mail.factory as f
+        self.assertTrue(hasattr(f, '_SELECTED_DOMAIN'), "_SELECTED_DOMAIN must be module-level")
+
+    def test_set_domain_updates_get_active_domain(self):
+        from mail.factory import set_domain, get_active_domain
+        set_domain("testdomain.com")
+        self.assertEqual(get_active_domain(), "testdomain.com")
+        set_domain("")
+
+    def test_validate_runtime_config_upload_without_server_url(self):
+        from cli.prompts import validate_runtime_config
+        import config
+        original = config.SERVER_URL
+        config.SERVER_URL = ""
+        try:
+            result = validate_runtime_config(upload=True, show_provider_summary=False)
+            self.assertFalse(result, "Should return False when SERVER_URL not configured")
+        finally:
+            config.SERVER_URL = original
+
+
 if __name__ == "__main__":
     unittest.main()
