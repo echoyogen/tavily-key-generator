@@ -3,12 +3,15 @@
 当前支持：
 1. Cloudflare 自定义邮件 API
 2. DuckMail API
+3. OnlineDispoMail API
 """
 import html
 import random
 import re
 import string
+import threading
 import time
+from pathlib import Path
 
 import requests as std_requests
 
@@ -23,6 +26,10 @@ from config import (
     EMAIL_DOMAINS,
     EMAIL_POLL_INTERVAL,
     EMAIL_PROVIDER,
+    ONLINEMAIL_API_KEY,
+    ONLINEMAIL_BUY_MODE,
+    ONLINEMAIL_MODE,
+    ONLINEMAIL_ORDERS_FILE,
 )
 
 _DUCKMAIL_DOMAIN_PRIORITY = (
@@ -33,6 +40,140 @@ _DUCKMAIL_DOMAIN_CACHE = None
 _DUCKMAIL_MAILBOX_CACHE = {}
 _SELECTED_DOMAIN = ""
 _SUPPORTED_SERVICES = ("tavily", "firecrawl", "exa", "you", "serper", "valyu")
+
+_ONLINEMAIL_API_BASE = "https://api.online-disposablemail.com/api"
+_ONLINEMAIL_SERVICE_MAP = {
+    "exa": {"service_id": "261", "email_type_id": "26"},
+    "you": {"service_id": "262", "email_type_id": "26"},
+}
+_ONLINEMAIL_UNSUPPORTED = frozenset({"tavily", "firecrawl", "serper", "valyu"})
+_ONLINEMAIL_MAILBOX_CACHE = {}
+_ONLINEMAIL_FILE_LOCK = threading.Lock()
+
+
+
+def _onlinemail_file_pop(service):
+    path = ONLINEMAIL_ORDERS_FILE
+    with _ONLINEMAIL_FILE_LOCK:
+        try:
+            lines = Path(path).read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"OnlineDispoMail orders file not found: {path}\n"
+                "Create the file with lines in format: email----orderId"
+            )
+        non_empty = [l.strip() for l in lines if l.strip()]
+        if not non_empty:
+            raise RuntimeError(
+                f"OnlineDispoMail orders file is exhausted: {path}\n"
+                "Please add more email----orderId pairs to the file."
+            )
+        consumed, remaining = non_empty[0], non_empty[1:]
+        Path(path).write_text("\n".join(remaining) + ("\n" if remaining else ""), encoding="utf-8")
+
+    parts = consumed.split("----", 1)
+    if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+        raise RuntimeError(
+            f"OnlineDispoMail orders file: invalid line format '{consumed}'\n"
+            "Expected: email----orderId"
+        )
+    email, order_id = parts[0].strip(), parts[1].strip()
+    return email, order_id
+
+
+def _onlinemail_api_purchase(service):
+    service_norm = _normalize_service(service)
+    mapping = _ONLINEMAIL_SERVICE_MAP.get(service_norm)
+    if not mapping:
+        raise RuntimeError(
+            f"OnlineDispoMail does not support service '{service_norm}'. "
+            f"Supported: {', '.join(sorted(_ONLINEMAIL_SERVICE_MAP))}"
+        )
+    params = {
+        "apiKey": ONLINEMAIL_API_KEY,
+        "serviceId": mapping["service_id"],
+        "emailTypeId": mapping["email_type_id"],
+        "quantity": "1",
+        "buyMode": ONLINEMAIL_BUY_MODE,
+        "linkPriority": "false",
+    }
+    response = std_requests.get(
+        f"{_ONLINEMAIL_API_BASE}/mailbox",
+        params=params,
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("code") != 200:
+        raise RuntimeError(
+            f"OnlineDispoMail purchase failed: code={data.get('code')} msg={data.get('msg')}"
+        )
+    orders = (data.get("data") or {}).get("orders") or []
+    if not orders:
+        raise RuntimeError("OnlineDispoMail API returned empty orders list")
+    first = orders[0]
+    email = (first.get("email") or "").strip()
+    order_id = (first.get("orderId") or "").strip()
+    if not email or not order_id:
+        raise RuntimeError(
+            f"OnlineDispoMail API returned invalid order: email={email!r}, orderId={order_id!r}"
+        )
+    return email, order_id
+
+
+def _create_onlinemail_mailbox(service):
+    service_norm = _normalize_service(service)
+    if service_norm in _ONLINEMAIL_UNSUPPORTED:
+        raise RuntimeError(
+            f"OnlineDispoMail does not support service '{service_norm}'. "
+            f"Use a different EMAIL_PROVIDER for this service."
+        )
+
+    if ONLINEMAIL_MODE == "api":
+        email, order_id = _onlinemail_api_purchase(service_norm)
+    else:
+        email, order_id = _onlinemail_file_pop(service_norm)
+
+    _ONLINEMAIL_MAILBOX_CACHE[email] = {"order_id": order_id}
+    return email
+
+
+def _onlinemail_iter_messages(email):
+    mailbox = _ONLINEMAIL_MAILBOX_CACHE.get(email)
+    if not mailbox:
+        raise RuntimeError(
+            "OnlineDispoMail mailbox context not found. "
+            "Re-generate the email address before polling."
+        )
+    order_id = mailbox["order_id"]
+    response = std_requests.get(
+        f"{_ONLINEMAIL_API_BASE}/latest/code",
+        params={"orderId": order_id},
+        timeout=15,
+    )
+    response.raise_for_status()
+    body = response.json()
+    biz_code = body.get("code")
+
+    if biz_code != 200:
+        msg = (body.get("msg") or "").lower()
+        terminal_keywords = ("closed", "timed out", "timeout", "not found", "no longer valid")
+        if any(kw in msg for kw in terminal_keywords):
+            raise RuntimeError(
+                f"OnlineDispoMail order terminal error: code={biz_code} msg={body.get('msg')}"
+            )
+        return
+
+    inner = body.get("data") or {}
+    code_str = (inner.get("code") or "").strip()
+    content_html = (inner.get("content") or "").strip()
+
+    yield {
+        "subject": "",
+        "from": "",
+        "html": content_html,
+        "text": code_str,
+    }
 
 
 def rand_str(n=8):
@@ -92,6 +233,9 @@ def create_email(service="tavily"):
 
     if EMAIL_PROVIDER == "duckmail":
         email = _create_duckmail_mailbox(password, prefix)
+    elif EMAIL_PROVIDER == "onlinemail":
+        email = _create_onlinemail_mailbox(service)
+        password = ""
     else:
         username = f"{prefix}-{rand_str()}"
         email = f"{username}@{get_active_domain()}"
@@ -235,6 +379,9 @@ def _extract_email_code(message, service="tavily"):
 def _iter_messages(email):
     if EMAIL_PROVIDER == "duckmail":
         yield from _duckmail_iter_messages(email)
+        return
+    if EMAIL_PROVIDER == "onlinemail":
+        yield from _onlinemail_iter_messages(email)
         return
 
     yield from _cloudflare_iter_messages(email)

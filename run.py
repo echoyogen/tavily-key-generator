@@ -93,6 +93,9 @@ from config import (
     SOLVER_PORT,
     SOLVER_THREADS,
     LOCAL_SOLVER_URL,
+    ONLINEMAIL_MODE,
+    ONLINEMAIL_API_KEY,
+    ONLINEMAIL_ORDERS_FILE,
 )
 from tavily_core import create_email as create_tavily_email, register as register_tavily
 from firecrawl_core import register as register_firecrawl
@@ -244,6 +247,13 @@ def validate_runtime_config(upload, show_provider_summary=True):
         required["DUCKMAIL_API_URL"] = DUCKMAIL_API_URL
         if any(is_placeholder_env_value("DUCKMAIL_DOMAINS", item) for item in DUCKMAIL_DOMAINS):
             append_unique(placeholder, "DUCKMAIL_DOMAIN / DUCKMAIL_DOMAINS")
+    elif EMAIL_PROVIDER == "onlinemail":
+        if ONLINEMAIL_MODE == "api":
+            if not ONLINEMAIL_API_KEY:
+                missing.append("ONLINEMAIL_API_KEY")
+        else:  # file mode
+            if not ONLINEMAIL_ORDERS_FILE:
+                missing.append("ONLINEMAIL_ORDERS_FILE")
     else:
         required.update({
             "EMAIL_API_URL": EMAIL_API_URL,
@@ -285,6 +295,11 @@ def validate_runtime_config(upload, show_provider_summary=True):
             print(f"📧 当前邮箱 provider: duckmail")
             print(f"   域名配置: {configured}")
             print(f"   API: {api_hint}")
+        elif EMAIL_PROVIDER == "onlinemail":
+            mode_hint = f"mode={ONLINEMAIL_MODE}"
+            if ONLINEMAIL_MODE == "file":
+                mode_hint += f", file={ONLINEMAIL_ORDERS_FILE}"
+            print(f"📧 当前邮箱 provider: onlinemail ({mode_hint})")
         else:
             print(f"📧 当前邮箱 provider: cloudflare")
             print(f"   域名配置: {', '.join(EMAIL_DOMAINS)}")
@@ -335,6 +350,8 @@ def print_runtime_summary(service="tavily"):
         print(f"  Solver 端口: {SOLVER_PORT}")
 
 def prompt_domain_choice():
+    if EMAIL_PROVIDER == "onlinemail":
+        return
     domains = get_configured_domains()
     if not domains:
         print(f"📮 当前域名: {get_active_domain() or '自动选择'}")
