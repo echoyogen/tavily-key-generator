@@ -97,6 +97,9 @@ from config import (
 from tavily_core import create_email as create_tavily_email, register as register_tavily
 from firecrawl_core import register as register_firecrawl
 from exa_core import register as register_exa
+from you_core import register as register_you
+from serper_core import register as register_serper
+from valyu_core import register as register_valyu
 from mail_provider import create_email, get_active_domain, get_configured_domains, set_selected_domain
 
 # ──────────────────────────────────────────────
@@ -293,16 +296,25 @@ def print_runtime_summary(service="tavily"):
         "tavily": "Tavily",
         "firecrawl": "Firecrawl",
         "exa": "Exa",
+        "you": "You.com",
+        "serper": "Serper",
+        "valyu": "Valyu",
     }.get(service, "Tavily")
     output_file = {
         "tavily": "accounts.txt",
         "firecrawl": "firecrawl_accounts.txt",
         "exa": "exa_accounts.txt",
+        "you": "you_accounts.txt",
+        "serper": "serper_accounts.txt",
+        "valyu": "valyu_accounts.txt",
     }.get(service, "accounts.txt")
     account_prefix = {
         "tavily": "tavily-",
         "firecrawl": "fc-",
         "exa": "exa-",
+        "you": "you-",
+        "serper": "serper-",
+        "valyu": "valyu-",
     }.get(service, "tavily-")
     print(f"""
 ┌──────────────────────────────────────────┐
@@ -499,6 +511,14 @@ def register_one(index, total, upload, service="tavily"):
             result = register_tavily(email, password)
         elif service == "firecrawl":
             result = register_firecrawl(email, password)
+        elif service == "exa":
+            result = register_exa(email, password)
+        elif service == "you":
+            result = register_you(email, password)
+        elif service == "serper":
+            result = register_serper(email, password)
+        elif service == "valyu":
+            result = register_valyu(email, password)
         else:
             result = register_exa(email, password)
 
@@ -581,9 +601,12 @@ def prompt_service_choice():
     print("  1. Tavily")
     print("  2. Firecrawl")
     print("  3. Exa")
+    print("  4. You.com")
+    print("  5. Serper")
+    print("  6. Valyu")
 
     while True:
-        print("请输入选项 (1-3，默认 1): ", end="")
+        print("请输入选项 (1-6，默认 1): ", end="")
         raw = input().strip()
         if raw == "" or raw == "1":
             return "tavily"
@@ -591,6 +614,12 @@ def prompt_service_choice():
             return "firecrawl"
         elif raw == "3":
             return "exa"
+        elif raw == "4":
+            return "you"
+        elif raw == "5":
+            return "serper"
+        elif raw == "6":
+            return "valyu"
         else:
             print("❌ 请输入有效编号")
             continue
