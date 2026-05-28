@@ -61,6 +61,16 @@ class RunBootstrapTests(unittest.TestCase):
         ensure_camoufox.assert_called_once_with()
         ensure_patchright.assert_called_once_with()
 
+    def test_ensure_service_browsers_uses_patchright_for_you(self) -> None:
+        with (
+            patch.object(bootstrap, "_ensure_camoufox_browser") as ensure_camoufox,
+            patch.object(bootstrap, "_ensure_patchright_browser") as ensure_patchright,
+        ):
+            bootstrap._ensure_service_browsers("you")
+
+        ensure_camoufox.assert_not_called()
+        ensure_patchright.assert_called_once_with()
+
     def test_camoufox_browser_ready_uses_cli_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "camoufox").write_text("ok", encoding="utf-8")

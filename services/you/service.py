@@ -1,7 +1,11 @@
+import contextlib
 import json
 import re
 import time
 
+from patchright.sync_api import sync_playwright
+
+from proxy_manager import get_proxy_dict
 from services.base import BaseService
 from services.common.browser import fill_first_input, extract_api_key_by_pattern
 
@@ -47,6 +51,19 @@ class YouService(BaseService):
     api_key_prefix = "you-"
     output_file = "you_accounts.txt"
     headless_config_key = "YOU_REGISTER_HEADLESS"
+
+    @contextlib.contextmanager
+    def _open_browser(self):
+        headless = self._get_headless_setting()
+        proxy = get_proxy_dict()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=headless)
+            ctx = browser.new_context(proxy=proxy) if proxy else browser.new_context()
+            try:
+                yield ctx
+            finally:
+                ctx.close()
+                browser.close()
 
     def _navigate_to_signup(self, page):
         self._intercepted_keys = []

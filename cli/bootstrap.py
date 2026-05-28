@@ -194,6 +194,9 @@ def _ensure_patchright_browser():
 
 
 def _ensure_service_browsers(service):
-    _ensure_camoufox_browser()
-    if service == "tavily":
+    if service == "you":
         _ensure_patchright_browser()
+    else:
+        _ensure_camoufox_browser()
+        if service == "tavily":
+            _ensure_patchright_browser()
