@@ -52,7 +52,13 @@ class YouService(BaseService):
         self._intercepted_keys = []
 
         def handle_response(response):
-            url = response.url.lower()
+            try:
+                url = response.url
+                if not url:
+                    return
+                url = url.lower()
+            except Exception:
+                return
             if "api.you.com" not in url and "you.com/api" not in url:
                 return
             try:
@@ -76,26 +82,70 @@ class YouService(BaseService):
             'a[href*="signup"]',
             'button:has-text("Sign up")',
             'button:has-text("Sign Up")',
+            'a:has-text("Get started")',
+            'button:has-text("Get started")',
+            'a:has-text("Create account")',
+            'button:has-text("Create account")',
+            'a:has-text("Register")',
+            'button:has-text("Register")',
         ]
+        signup_clicked = False
         for selector in signup_selectors:
             if page.query_selector(selector):
                 page.click(selector, no_wait_after=True)
+                signup_clicked = True
                 break
 
-        time.sleep(2)
+        if not signup_clicked:
+            try:
+                current_url = page.url
+                title = page.title()
+            except Exception:
+                current_url = "unknown"
+                title = "unknown"
+            print(f"you.com signup button not found (url={current_url!r}, title={title!r})")
 
         email_option_selectors = [
             'a:has-text("Email")',
             'button:has-text("Email")',
             'a:has-text("email")',
             'button:has-text("email")',
+            'a:has-text("Continue with email")',
+            'button:has-text("Continue with email")',
         ]
-        for selector in email_option_selectors:
-            if page.query_selector(selector):
-                page.click(selector, no_wait_after=True)
-                break
+        email_option_clicked = False
+        if signup_clicked:
+            try:
+                page.wait_for_selector(
+                    ', '.join(email_option_selectors),
+                    timeout=5000,
+                )
+            except Exception:
+                pass
+            for selector in email_option_selectors:
+                if page.query_selector(selector):
+                    page.click(selector, no_wait_after=True)
+                    email_option_clicked = True
+                    break
+            if not email_option_clicked:
+                try:
+                    current_url = page.url
+                    title = page.title()
+                except Exception:
+                    current_url = "unknown"
+                    title = "unknown"
+                print(f"you.com email option not found after signup click (url={current_url!r}, title={title!r})")
 
-        time.sleep(1)
+        if email_option_clicked:
+            try:
+                page.wait_for_selector(
+                    'input[type="email"], input[placeholder*="email" i], input[name="email"]',
+                    timeout=5000,
+                )
+            except Exception:
+                pass
+        else:
+            time.sleep(1)
 
     def _fill_form(self, page, email, password):
         email_selector = fill_first_input(
@@ -104,7 +154,13 @@ class YouService(BaseService):
             email,
         )
         if not email_selector:
-            print("Email input not found on you.com")
+            try:
+                current_url = page.url
+                title = page.title()
+            except Exception:
+                current_url = "unknown"
+                title = "unknown"
+            print(f"Email input not found on you.com (url={current_url!r}, title={title!r})")
             return
 
         self._email_selector = email_selector
