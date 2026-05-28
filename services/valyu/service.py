@@ -85,7 +85,7 @@ class ValyuService(BaseService):
         )
 
         print("Navigating to signup page...")
-        page.goto("https://platform.valyu.ai/auth/signup", wait_until="networkidle", timeout=30000)
+        page.goto("https://platform.valyu.ai/auth/signup", wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
     def _fill_form(self, page, email, password):
@@ -174,7 +174,7 @@ class ValyuService(BaseService):
 
         print(f"Received verification link: {verify_url[:50]}...")
         print("Navigating to verification link...")
-        page.goto(verify_url, wait_until="networkidle", timeout=60000)
+        page.goto(verify_url, wait_until="domcontentloaded", timeout=60000)
         time.sleep(5)
 
         current_url = page.url.lower()
@@ -183,7 +183,7 @@ class ValyuService(BaseService):
             time.sleep(3)
 
         print("Navigating to API keys page...")
-        page.goto("https://platform.valyu.ai/user/account/apikeys", wait_until="networkidle", timeout=30000)
+        page.goto("https://platform.valyu.ai/user/account/apikeys", wait_until="domcontentloaded", timeout=30000)
         time.sleep(3)
 
         create_selectors = [

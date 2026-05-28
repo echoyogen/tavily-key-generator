@@ -67,7 +67,7 @@ class YouService(BaseService):
 
         page.on("response", handle_response)
 
-        page.goto("https://you.com/platform", wait_until="networkidle", timeout=30000)
+        page.goto("https://you.com/platform", wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
         signup_selectors = [
@@ -181,7 +181,7 @@ class YouService(BaseService):
         print("you.com login successful")
         time.sleep(2)
 
-        page.goto("https://you.com/platform/api-keys", wait_until="networkidle", timeout=30000)
+        page.goto("https://you.com/platform/api-keys", wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
         for selector in [

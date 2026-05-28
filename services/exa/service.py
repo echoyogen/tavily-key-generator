@@ -65,7 +65,7 @@ def _ensure_dashboard_ready(page):
         time.sleep(2)
 
     if "/home" not in page.url.lower():
-        page.goto(_EXA_HOME_URL, wait_until="networkidle", timeout=30000)
+        page.goto(_EXA_HOME_URL, wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
 
@@ -77,7 +77,7 @@ class ExaService(BaseService):
     headless_config_key = "EXA_REGISTER_HEADLESS"
 
     def _navigate_to_signup(self, page):
-        page.goto(_EXA_AUTH_URL, wait_until="networkidle", timeout=30000)
+        page.goto(_EXA_AUTH_URL, wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
     def _fill_form(self, page, email, password):

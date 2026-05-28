@@ -71,7 +71,7 @@ class SerperService(BaseService):
 
     def _navigate_to_signup(self, page):
         print("Navigating to signup page...")
-        page.goto("https://serper.dev/signup", wait_until="networkidle", timeout=30000)
+        page.goto("https://serper.dev/signup", wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
     def _fill_form(self, page, email, password):
@@ -163,7 +163,7 @@ class SerperService(BaseService):
 
         print(f"Received verification link: {verify_url[:50]}...")
         print("Navigating to verification link...")
-        page.goto(verify_url, wait_until="networkidle", timeout=60000)
+        page.goto(verify_url, wait_until="domcontentloaded", timeout=60000)
         time.sleep(5)
 
         current_url = page.url.lower()
@@ -196,7 +196,7 @@ class SerperService(BaseService):
         print("Navigating to API keys page...")
         for url in ["https://serper.dev/dashboard", "https://serper.dev/api-keys"]:
             try:
-                page.goto(url, wait_until="networkidle", timeout=15000)
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 time.sleep(3)
                 break
             except Exception:

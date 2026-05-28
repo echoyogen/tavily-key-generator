@@ -454,7 +454,7 @@ class TavilyService(BaseService):
                 browser.close()
 
     def _navigate_to_signup(self, page):
-        page.goto("https://app.tavily.com/sign-in", wait_until="networkidle", timeout=30000)
+        page.goto("https://app.tavily.com/sign-in", wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
         html = page.content()
@@ -462,7 +462,7 @@ class TavilyService(BaseService):
         if match:
             signup_url = f"https://auth.tavily.com{match.group(1)}"
             print("Navigating to signup page...")
-            page.goto(signup_url, wait_until="networkidle", timeout=30000)
+            page.goto(signup_url, wait_until="domcontentloaded", timeout=30000)
             time.sleep(2)
         else:
             selectors = [
@@ -564,7 +564,7 @@ class TavilyService(BaseService):
         if not verify_url:
             return
 
-        page.goto(verify_url, wait_until="networkidle", timeout=60000)
+        page.goto(verify_url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_url("**/app.tavily.com/**", timeout=60000)
         time.sleep(3)
 

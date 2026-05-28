@@ -19,7 +19,7 @@ class FirecrawlService(BaseService):
     headless_config_key = "FIRECRAWL_REGISTER_HEADLESS"
 
     def _navigate_to_signup(self, page):
-        page.goto("https://firecrawl.dev/", wait_until="networkidle", timeout=30000)
+        page.goto("https://firecrawl.dev/", wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
         signup_selectors = [
@@ -88,7 +88,7 @@ class FirecrawlService(BaseService):
             print("Verification email not received")
             return
 
-        page.goto(verify_url, wait_until="networkidle", timeout=60000)
+        page.goto(verify_url, wait_until="domcontentloaded", timeout=60000)
         time.sleep(5)
 
         current_url = page.url.lower()
@@ -145,7 +145,7 @@ class FirecrawlService(BaseService):
             ]
             for url in possible_urls:
                 try:
-                    page.goto(url, wait_until="networkidle", timeout=15000)
+                    page.goto(url, wait_until="domcontentloaded", timeout=15000)
                     time.sleep(3)
                     if "api" in page.url.lower() and "key" in page.url.lower():
                         break
