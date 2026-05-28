@@ -1,357 +1,332 @@
-import contextlib
-import json
+"""
+YouService — 纯 HTTP 逆向实现（无浏览器）
+
+认证链路：
+  1. POST auth.you.com/v1/auth/otp/signup/email  (新账号) 或
+     POST auth.you.com/v1/auth/otp/signin/email  (已有账号)
+       Authorization: Bearer <DESCOPE_PROJECT_ID>
+       body: {"loginId": "<email>"}
+       → 触发 OTP 邮件发送
+
+  2. 读取 OTP 邮件验证码（通过 mail provider）
+
+  3. POST auth.you.com/v1/auth/otp/verify/email
+       Authorization: Bearer <DESCOPE_PROJECT_ID>
+       body: {"loginId": "<email>", "code": "<otp>"}
+       → Set-Cookie: DS=...; DSR=...（自动注入 sess.cookies）
+
+  4. GET you.com/platform/api-keys
+       → 提取 Next.js Server Action 参数（$ACTION_1:0、$ACTION_KEY 等）
+
+  5. POST you.com/platform/api-keys  (multipart/form-data + Next-Action header)
+       → RSC payload，从中提取 ydc-sk-... 格式的 API key
+"""
+
+import html as _html_mod
 import re
 import time
 
-from patchright.sync_api import sync_playwright
+import requests
 
-from proxy_manager import get_proxy_dict
+import config
 from services.base import BaseService
-from services.common.browser import fill_first_input, extract_api_key_by_pattern
 
 
-def _extract_you_api_key_from_response(body):
-    if not body:
-        return None
+# ---------------------------------------------------------------------------
+# 常量
+# ---------------------------------------------------------------------------
+DESCOPE_PROJECT_ID = "P2jInttRMuXpyYZMbVcsc4C9Z0RT"
+DESCOPE_BASE = "https://auth.you.com"
 
-    try:
-        data = json.loads(body)
-    except Exception:
-        data = None
+# Server Action ID（基于 you.com 代码 hash，版本固定时不变）
+_SERVER_ACTION_ID = "60181fa620faa693db04894fec1c5433ba0a327c76"
 
-    if data and isinstance(data, dict):
-        for field in ("api_key", "apiKey", "key", "token", "access_token", "secret"):
-            candidate = data.get(field)
-            if candidate and isinstance(candidate, str) and len(candidate) >= 30:
-                return candidate.strip()
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 
-        for value in data.values():
-            if isinstance(value, dict):
-                result = _extract_you_api_key_from_response(json.dumps(value))
-                if result:
-                    return result
-            elif isinstance(value, list):
-                for item in value:
-                    if isinstance(item, dict):
-                        result = _extract_you_api_key_from_response(json.dumps(item))
-                        if result:
-                            return result
+_NAV_HEADERS = {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "user-agent": _UA,
+}
 
-    candidates = re.findall(r"[A-Za-z0-9_\-]{32,}", body)
-    for candidate in candidates:
-        if re.search(r"[a-zA-Z]", candidate) and re.search(r"[0-9]", candidate):
-            return candidate
-
-    return None
+_DESCOPE_HEADERS = {
+    "accept": "application/json",
+    "content-type": "application/json",
+    "origin": "https://you.com",
+    "referer": "https://you.com/",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "cross-site",
+    "user-agent": _UA,
+    "authorization": f"Bearer {DESCOPE_PROJECT_ID}",
+}
 
 
 class YouService(BaseService):
     name = "you"
     signup_url = "https://you.com/"
-    api_key_prefix = "you-"
+    api_key_prefix = "ydc-sk-"
     output_file = "you_accounts.txt"
     headless_config_key = "YOU_REGISTER_HEADLESS"
 
-    @contextlib.contextmanager
-    def _open_browser(self):
-        headless = self._get_headless_setting()
-        proxy = get_proxy_dict()
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless)
-            ctx = browser.new_context(proxy=proxy) if proxy else browser.new_context()
-            try:
-                yield ctx
-            finally:
-                ctx.close()
-                browser.close()
+    # ------------------------------------------------------------------
+    # 主入口 — 完全绕开 BaseService.register() 的浏览器流程
+    # ------------------------------------------------------------------
+    def register(self, email, password):
+        sess = requests.Session()
 
-    def _navigate_to_signup(self, page):
-        self._intercepted_keys = []
+        # Step 0: warm-up — 让 Cloudflare 设置 uuid_guest cookie
+        self._warm_up(sess)
 
-        def handle_response(response):
-            try:
-                url = response.url
-                if not url:
-                    return
-                url = url.lower()
-            except Exception:
-                return
-            if "api.you.com" not in url and "you.com/api" not in url:
-                return
-            try:
-                body = response.text()
-            except Exception:
-                return
-            if not body:
-                return
-            key = _extract_you_api_key_from_response(body)
-            if key:
-                self._intercepted_keys.append(key)
+        # Step 1 & 2: 发 OTP 邮件，等验证码（signup 失败时自动切 signin）
+        otp_code, is_new = self._request_otp_and_get_code(sess, email)
+        if not otp_code:
+            return None
 
-        page.on("response", handle_response)
+        # Step 3: 验证 OTP，DS/DSR cookies 自动注入 sess
+        if not self._verify_otp(sess, email, otp_code):
+            return None
 
-        page.goto("https://you.com/platform", wait_until="domcontentloaded", timeout=30000)
-        time.sleep(2)
+        # Step 4 & 5: 获取 action 参数，提交 Server Action 创建 key
+        api_key = self._create_api_key(sess)
+        if not api_key:
+            print("[you] Failed to create API key")
+            return None
 
-        signup_selectors = [
-            'a:has-text("Sign up")',
-            'a:has-text("Sign Up")',
-            'a[href*="signup"]',
-            'button:has-text("Sign up")',
-            'button:has-text("Sign Up")',
-            'a:has-text("Get started")',
-            'button:has-text("Get started")',
-            'a:has-text("Create account")',
-            'button:has-text("Create account")',
-            'a:has-text("Register")',
-            'button:has-text("Register")',
-        ]
-        signup_clicked = False
-        for selector in signup_selectors:
-            if page.query_selector(selector):
-                page.click(selector, no_wait_after=True)
-                signup_clicked = True
-                break
+        # Step 6: 验证并保存
+        self._do_post_verify(api_key)
+        self._save_result(email, password, api_key)
+        return api_key
 
-        if not signup_clicked:
-            try:
-                current_url = page.url
-                title = page.title()
-            except Exception:
-                current_url = "unknown"
-                title = "unknown"
-            print(f"you.com signup button not found (url={current_url!r}, title={title!r})")
+    # ------------------------------------------------------------------
+    # 步骤实现
+    # ------------------------------------------------------------------
 
-        email_option_selectors = [
-            'a:has-text("Email")',
-            'button:has-text("Email")',
-            'a:has-text("email")',
-            'button:has-text("email")',
-            'a:has-text("Continue with email")',
-            'button:has-text("Continue with email")',
-        ]
-        email_option_clicked = False
-        if signup_clicked:
-            try:
-                page.wait_for_selector(
-                    ', '.join(email_option_selectors),
-                    timeout=5000,
-                )
-            except Exception:
-                pass
-            for selector in email_option_selectors:
-                if page.query_selector(selector):
-                    page.click(selector, no_wait_after=True)
-                    email_option_clicked = True
-                    break
-            if not email_option_clicked:
-                try:
-                    current_url = page.url
-                    title = page.title()
-                except Exception:
-                    current_url = "unknown"
-                    title = "unknown"
-                print(f"you.com email option not found after signup click (url={current_url!r}, title={title!r})")
-
-        if email_option_clicked:
-            try:
-                page.wait_for_selector(
-                    'input[type="email"], input[placeholder*="email" i], input[name="email"]',
-                    timeout=5000,
-                )
-            except Exception:
-                pass
-        else:
-            time.sleep(1)
-
-    def _fill_form(self, page, email, password):
-        email_selector = fill_first_input(
-            page,
-            ['input[type="email"]', 'input[placeholder*="email" i]', 'input[name="email"]'],
-            email,
-        )
-        if not email_selector:
-            try:
-                current_url = page.url
-                title = page.title()
-            except Exception:
-                current_url = "unknown"
-                title = "unknown"
-            print(f"Email input not found on you.com (url={current_url!r}, title={title!r})")
-            return
-
-        self._email_selector = email_selector
-
-    def _submit_form(self, page):
-        email_selector = getattr(self, "_email_selector", None)
-
-        submitted = False
-        for selector in ['button:has-text("Continue")', 'button:has-text("Submit")', 'button[type="submit"]']:
-            if page.query_selector(selector):
-                page.click(selector, no_wait_after=True)
-                submitted = True
-                break
-
-        if not submitted and email_selector:
-            page.press(email_selector, "Enter")
-
+    def _warm_up(self, sess):
+        """访问 you.com/signin，让 Cloudflare 设置 uuid_guest cookie。"""
         try:
-            page.wait_for_selector(
-                'input[placeholder*="code" i], input[type="number"], input[placeholder*="verify" i], input[placeholder*="otp" i]',
-                timeout=30000,
-            )
-        except Exception:
-            print("OTP input not found on you.com")
-            return
+            sess.get("https://you.com/signin", headers=_NAV_HEADERS, timeout=15)
+        except Exception as e:
+            print(f"[you] Warm-up warning: {e}")
 
-        print("Reached you.com OTP page")
-
-    def _verify_email(self, page, email):
+    def _request_otp_and_get_code(self, sess, email):
+        """
+        发送 OTP 并等待验证码，返回 (code, is_new_account)。
+        自动尝试 signup → signin 降级。
+        返回 (None, False) 表示失败。
+        """
         from mail.factory import get_provider
         provider = get_provider()
 
-        import config
-        code = provider.get_email_code(email, timeout=config.EMAIL_CODE_TIMEOUT, service_hint="you")
-        if not code:
-            print("Failed to get OTP code for you.com")
-            return
+        # 在发 OTP 前先记录已有邮件 ID，避免复用旧验证码
+        existing_ids = provider.get_existing_message_ids(email)
 
-        otp_selector = fill_first_input(
-            page,
-            [
-                'input[placeholder*="code" i]',
-                'input[type="number"]',
-                'input[placeholder*="verify" i]',
-                'input[placeholder*="otp" i]',
-            ],
-            code,
-        )
-        if not otp_selector:
-            print("OTP input field not found after code retrieval")
-            return
-
-        submitted = False
-        for selector in [
-            'button:has-text("Verify")',
-            'button:has-text("Continue")',
-            'button:has-text("Submit")',
-            'button[type="submit"]',
+        for endpoint, label, is_new in [
+            (f"{DESCOPE_BASE}/v1/auth/otp/signup/email", "signup", True),
+            (f"{DESCOPE_BASE}/v1/auth/otp/signin/email", "signin", False),
         ]:
-            if page.query_selector(selector):
-                page.click(selector, no_wait_after=True)
-                submitted = True
-                break
+            try:
+                r = sess.post(
+                    endpoint,
+                    json={"loginId": email},
+                    headers=_DESCOPE_HEADERS,
+                    timeout=15,
+                )
+            except Exception as e:
+                print(f"[you] OTP {label} request failed: {e}")
+                return None, False
 
-        if not submitted:
-            page.press(otp_selector, "Enter")
+            if r.status_code == 200:
+                masked = r.json().get("maskedEmail", "?")
+                print(f"[you] OTP sent ({label}) to {masked}")
 
+                code = provider.get_email_code(
+                    email,
+                    timeout=config.EMAIL_CODE_TIMEOUT,
+                    service_hint="you",
+                    skip_ids=existing_ids,
+                )
+                if not code:
+                    print("[you] Failed to get OTP code from email")
+                    return None, False
+                return code, is_new
+
+            body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            error_code = body.get("errorCode", "") if isinstance(body, dict) else ""
+
+            # E062503 = "User already exists" → 切换到 signin
+            if error_code in ("E062503",) or "already" in str(body).lower():
+                print("[you] Email already registered, switching to sign-in")
+                continue
+
+            print(f"[you] OTP {label} error {r.status_code}: {body}")
+            return None, False
+
+        return None, False
+
+    def _verify_otp(self, sess, email, code):
+        """
+        POST auth.you.com/v1/auth/otp/verify/email
+        成功后 DS/DSR cookies 通过 Set-Cookie 自动注入 sess.cookies。
+        返回 True/False。
+        """
         try:
-            page.wait_for_url("**/you.com/platform**", timeout=30000, wait_until="domcontentloaded")
-        except Exception:
-            print("Did not reach you.com platform dashboard after OTP")
-            return
+            r = sess.post(
+                f"{DESCOPE_BASE}/v1/auth/otp/verify/email",
+                json={"loginId": email, "code": code},
+                headers=_DESCOPE_HEADERS,
+                timeout=15,
+            )
+        except Exception as e:
+            print(f"[you] OTP verify request failed: {e}")
+            return False
 
-        print("you.com login successful")
-        time.sleep(2)
+        if r.status_code != 200:
+            print(f"[you] OTP verify failed {r.status_code}: {r.text[:200]}")
+            return False
 
-        page.goto("https://you.com/platform/api-keys", wait_until="domcontentloaded", timeout=30000)
-        time.sleep(2)
+        # 确认 DSR cookie 存在（Descope session）
+        dsr = sess.cookies.get("DSR", domain=".you.com")
+        if not dsr:
+            # 也尝试不带 domain 前缀
+            dsr = next((c.value for c in sess.cookies if c.name == "DSR"), None)
+        if not dsr:
+            print("[you] OTP verify succeeded but DSR cookie not found")
+            return False
 
-        for selector in [
-            'button:has-text("Create")',
-            'button:has-text("New")',
-            'button:has-text("Generate")',
-            'button:has-text("Create API Key")',
-            'button:has-text("New API Key")',
-        ]:
-            if page.query_selector(selector):
-                page.click(selector, no_wait_after=True)
-                break
+        print("[you] OTP verified, session obtained")
+        return True
 
-        time.sleep(1)
+    def _create_api_key(self, sess):
+        """
+        1. GET /platform/api-keys → 提取 Server Action 参数
+        2. POST /platform/api-keys (multipart/form-data) → 解析 RSC 响应提取 key
+        """
+        # Step 4: 获取页面，提取 action 参数
+        try:
+            r_page = sess.get(
+                "https://you.com/platform/api-keys",
+                headers={**_NAV_HEADERS, "sec-fetch-site": "same-origin"},
+                timeout=20,
+            )
+        except Exception as e:
+            print(f"[you] Failed to fetch /platform/api-keys: {e}")
+            return None
 
-        fill_first_input(
-            page,
-            ['input[placeholder*="name" i]', 'input[name*="name" i]'],
-            "auto-key",
-        )
+        if r_page.status_code != 200:
+            print(f"[you] /platform/api-keys returned {r_page.status_code}")
+            return None
 
-        for selector in [
-            'button:has-text("Create")',
-            'button:has-text("Confirm")',
-            'button:has-text("Generate")',
-            'button[type="submit"]',
-        ]:
-            if page.query_selector(selector):
-                page.click(selector, no_wait_after=True)
-                break
+        action_id, action_1_0, action_1_1, action_key = self._extract_action_params(r_page.text)
+        print(f"[you] Server Action ID: {action_id[:16]}..., KEY: {action_key[:8]}...")
 
-        time.sleep(2)
+        # Step 5: 提交 Server Action
+        key_name = f"auto-key-{int(time.time())}"
+        try:
+            r_create = sess.post(
+                "https://you.com/platform/api-keys",
+                files={
+                    "_1_$ACTION_REF_1": (None, ""),
+                    "_1_$ACTION_1:0": (None, action_1_0),
+                    "_1_$ACTION_1:1": (None, action_1_1),
+                    "_1_$ACTION_KEY": (None, action_key),
+                    "_1_name": (None, key_name),
+                    "0": (None, "[" + action_1_1 + ',"$K1"]'),
+                },
+                headers={
+                    "accept": "text/x-component",
+                    "next-action": action_id,
+                    "origin": "https://you.com",
+                    "referer": "https://you.com/platform/api-keys",
+                    "user-agent": _UA,
+                    "sec-fetch-site": "same-origin",
+                    "sec-fetch-mode": "cors",
+                },
+                timeout=30,
+            )
+        except Exception as e:
+            print(f"[you] Server Action POST failed: {e}")
+            return None
 
-    def _extract_api_key(self, page):
-        intercepted_keys = getattr(self, "_intercepted_keys", [])
-        if intercepted_keys:
-            api_key = intercepted_keys[-1]
-            print("API key captured via network interception")
+        if r_create.status_code != 200:
+            print(f"[you] Server Action returned {r_create.status_code}: {r_create.text[:200]}")
+            return None
+
+        # 从 RSC payload 提取 ydc-sk-... 格式的 key
+        api_key = self._extract_key_from_rsc(r_create.text)
+        if api_key:
+            print(f"[you] API key created: {api_key[:20]}...")
             return api_key
 
-        dom_selectors = [
-            'input[type="text"]',
-            'code',
-            '[data-testid*="key"]',
-            'input[readonly]',
-        ]
-        for selector in dom_selectors:
-            elements = page.query_selector_all(selector)
-            for el in elements:
-                try:
-                    text = el.get_attribute("value") or el.inner_text()
-                    if text and len(text) >= 30 and re.search(r"[A-Za-z0-9_\-]{30,}", text):
-                        print(f"API key extracted from DOM ({selector})")
-                        return text.strip()
-                except Exception:
-                    continue
-
-        try:
-            content = page.content()
-            candidates = re.findall(r"[A-Za-z0-9_\-]{32,}", content)
-            for candidate in candidates:
-                if re.search(r"[a-zA-Z]", candidate) and re.search(r"[0-9]", candidate):
-                    print("API key extracted from page content via regex")
-                    return candidate
-        except Exception:
-            pass
-
-        print("you.com API key not found")
+        print(f"[you] Server Action succeeded but key not found in RSC response")
         return None
 
+    @staticmethod
+    def _extract_action_params(html: str):
+        """从 /platform/api-keys 页面 HTML 提取 Server Action 参数。"""
+        m0 = re.search(r'name="\$ACTION_1:0" value="([^"]+)"', html)
+        m1 = re.search(r'name="\$ACTION_1:1" value="([^"]+)"', html)
+        mk = re.search(r'name="\$ACTION_KEY" value="([^"]+)"', html)
+        mid = re.search(r'"id"\s*:\s*"([0-9a-f]{40,})"', _html_mod.unescape(m0.group(1)) if m0 else "")
+
+        action_id = mid.group(1) if mid else _SERVER_ACTION_ID
+        action_1_0 = _html_mod.unescape(m0.group(1)) if m0 else f'{{"id":"{action_id}","bound":"$@1"}}'
+        action_1_1 = _html_mod.unescape(m1.group(1)) if m1 else '[{"errorMap":{"onServer":"$undefined"},"values":"$undefined","errors":[]}]'
+        action_key = mk.group(1) if mk else "k4cb809cd0c4e7e5070df726fd89de5fc"
+
+        return action_id, action_1_0, action_1_1, action_key
+
+    @staticmethod
+    def _extract_key_from_rsc(rsc_text: str):
+        """从 Next.js RSC (text/x-component) payload 提取 ydc-sk-... API key。"""
+        keys = re.findall(r'ydc-sk-[a-zA-Z0-9_\-]{20,}', rsc_text)
+        return keys[0] if keys else None
+
+    # ------------------------------------------------------------------
+    # 验证 & 保存（复用 BaseService 逻辑）
+    # ------------------------------------------------------------------
+
     def _do_post_verify(self, api_key):
-        import requests as std_requests
-        import config
+        if not api_key:
+            return
         try:
-            response = std_requests.get(
-                "https://api.you.com/v2/search",
+            r = requests.get(
+                "https://api.you.com/v1/search",
                 params={"query": "test", "num_web_results": 1},
-                headers={
-                    "X-API-Key": api_key,
-                    "Accept": "application/json",
-                },
+                headers={"X-API-Key": api_key, "Accept": "application/json"},
                 timeout=getattr(config, "API_KEY_TIMEOUT", 30),
             )
+            if r.status_code == 200:
+                print("[you] API key verification passed")
+            else:
+                print(f"[you] API key verification failed: HTTP {r.status_code} {r.text[:120]}")
         except Exception as exc:
-            print(f"API key verification request failed: {exc}")
-            return
-
-        if response.status_code == 200:
-            print("API key verification passed")
-            return
-
-        preview = response.text.strip().replace("\n", " ")[:160]
-        print(f"API key verification failed: HTTP {response.status_code}")
-        if preview:
-            print(f"   response: {preview}")
+            print(f"[you] API key verification request failed: {exc}")
 
     def _save_result(self, email, password, api_key):
         with BaseService._SAVE_LOCK:
             with open(self.output_file, "a", encoding="utf-8") as f:
                 f.write(f"{email},OTP_ONLY,{api_key}\n")
+
+    # ------------------------------------------------------------------
+    # BaseService abstract stubs（不再使用，但必须实现）
+    # ------------------------------------------------------------------
+
+    def _open_browser(self):
+        raise NotImplementedError("YouService uses HTTP-only flow, no browser needed")
+
+    def _navigate_to_signup(self, page):
+        raise NotImplementedError
+
+    def _fill_form(self, page, email, password):
+        raise NotImplementedError
+
+    def _submit_form(self, page):
+        raise NotImplementedError
+
+    def _verify_email(self, page, email):
+        raise NotImplementedError
+
+    def _extract_api_key(self, page):
+        raise NotImplementedError

@@ -7,6 +7,7 @@ from mail.duckmail import DuckMailProvider
 from mail.onlinemail import OnlineMailProvider
 
 _SELECTED_DOMAIN = ""
+_PROVIDER_INSTANCE = None
 
 _SUPPORTED_SERVICES = ("tavily", "firecrawl", "exa", "you", "serper", "valyu")
 
@@ -36,22 +37,27 @@ def get_configured_domains():
 
 
 def get_provider():
+    global _PROVIDER_INSTANCE
     provider = config.EMAIL_PROVIDER
     domain = get_active_domain()
+
+    # OnlineMailProvider must be a singleton so _mailbox_cache is shared between
+    # create_email() (which populates it) and _verify_email() (which reads it).
+    if provider == "onlinemail":
+        if _PROVIDER_INSTANCE is None:
+            _PROVIDER_INSTANCE = OnlineMailProvider(
+                api_url="https://api.online-disposablemail.com/api",
+                api_key=config.ONLINEMAIL_API_KEY,
+                orders_file=config.ONLINEMAIL_ORDERS_FILE,
+                mode=config.ONLINEMAIL_MODE,
+            )
+        return _PROVIDER_INSTANCE
 
     if provider == "duckmail":
         return DuckMailProvider(
             api_url=config.DUCKMAIL_API_URL,
             api_key=config.DUCKMAIL_API_KEY,
             domains=config.DUCKMAIL_DOMAINS[:],
-        )
-
-    if provider == "onlinemail":
-        return OnlineMailProvider(
-            api_url="https://api.online-disposablemail.com/api",
-            api_key=config.ONLINEMAIL_API_KEY,
-            orders_file=config.ONLINEMAIL_ORDERS_FILE,
-            mode=config.ONLINEMAIL_MODE,
         )
 
     return CloudflareProvider(

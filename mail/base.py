@@ -37,7 +37,7 @@ class MailProvider(ABC):
             dot_progress=True,
         )
 
-    def get_email_code(self, email, timeout=120, service_hint="tavily"):
+    def get_email_code(self, email, timeout=120, service_hint="tavily", skip_ids=None):
         print(f"📨 等待邮箱验证码（最多 {timeout} 秒）...")
         return self._poll_mailbox(
             email=email,
@@ -47,11 +47,19 @@ class MailProvider(ABC):
             timeout_message="❌ 等待邮箱验证码超时",
             error_prefix="读取邮箱验证码失败",
             dot_progress=False,
+            skip_ids=skip_ids,
         )
 
-    def _poll_mailbox(self, email, timeout, extractor, found_message, timeout_message, error_prefix, dot_progress):
+    def get_existing_message_ids(self, email) -> set:
+        """返回当前邮箱里所有已存在的消息 ID，用于之后跳过旧邮件"""
+        try:
+            return {self._message_id(m) for m in self.get_messages(email) if self._message_id(m)}
+        except Exception:
+            return set()
+
+    def _poll_mailbox(self, email, timeout, extractor, found_message, timeout_message, error_prefix, dot_progress, skip_ids=None):
         start_time = time.time()
-        seen_ids = set()
+        seen_ids = set(skip_ids) if skip_ids else set()
 
         while time.time() - start_time < timeout:
             try:
@@ -129,14 +137,15 @@ class MailProvider(ABC):
                 return None
             for source in (text, content):
                 match = re.search(
-                    r"verification code(?:\s+is)?[^0-9]*(\d{6})",
+                    r"(?:verification|login|one-time)\s+code(?:\s+is)?[^0-9]*(\d{6})",
                     source,
                     re.IGNORECASE,
                 )
                 if match:
                     return match.group(1)
             for source in (text, content):
-                match = re.search(r"\b(\d{6})\b", source)
+                # exclude CSS color values like #101012
+                match = re.search(r"(?<!#)\b(\d{6})\b", source)
                 if match:
                     return match.group(1)
             return None
