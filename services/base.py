@@ -36,7 +36,9 @@ class BaseService(ABC):
 
     def register(self, email, password):
         self._pre_register_hook()
-        with self._open_browser() as browser:
+        browser_cm = self._open_browser()
+        browser = browser_cm.__enter__()
+        try:
             page = browser.new_page()
             self._navigate_to_signup(page)
             self._fill_form(page, email, password)
@@ -46,6 +48,11 @@ class BaseService(ABC):
             self._do_post_verify(api_key)
             self._save_result(email, password, api_key)
             return api_key
+        finally:
+            try:
+                browser_cm.__exit__(None, None, None)
+            except Exception as teardown_exc:
+                print(f"Browser cleanup warning: {teardown_exc}")
 
     def _pre_register_hook(self):
         pass
