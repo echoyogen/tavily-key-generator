@@ -26,7 +26,7 @@ _VERIFY_CONFIGS = {
         "expected_status": 200,
     },
     "firecrawl": {
-        "endpoint": "https://api.firecrawl.dev/v1/scrape",
+        "endpoint": "https://api.firecrawl.dev/v2/scrape",
         "headers": lambda k: {"Authorization": f"Bearer {k}", "Content-Type": "application/json"},
         "expected_status": 200,
     },
@@ -36,8 +36,10 @@ _VERIFY_CONFIGS = {
         "expected_status": 200,
     },
     "you": {
-        "endpoint": "https://api.ydc-index.io/search",
-        "headers": lambda k: {"X-API-Key": k},
+        "method": "GET",
+        "endpoint": "https://api.you.com/v1/search",
+        "params": {"query": "test", "num_web_results": 1},
+        "headers": lambda k: {"X-API-Key": k, "Accept": "application/json"},
         "expected_status": 200,
     },
     "serper": {
@@ -46,7 +48,7 @@ _VERIFY_CONFIGS = {
         "expected_status": 200,
     },
     "valyu": {
-        "endpoint": "https://api.valyu.network/v1/search",
+        "endpoint": "https://api.valyu.ai/v1/search",
         "headers": lambda k: {"x-api-key": k, "Content-Type": "application/json"},
         "expected_status": 200,
     },
@@ -60,13 +62,22 @@ def _do_verify(service: str, api_key: str) -> int:
         return 2  # 未知平台，标记为未验证
 
     import requests
+    method = cfg.get("method", "POST").upper()
     try:
-        resp = requests.post(
-            cfg["endpoint"],
-            headers=cfg["headers"](api_key),
-            json={"query": "test", "max_results": 1},
-            timeout=20,
-        )
+        if method == "GET":
+            resp = requests.get(
+                cfg["endpoint"],
+                headers=cfg["headers"](api_key),
+                params=cfg.get("params"),
+                timeout=20,
+            )
+        else:
+            resp = requests.post(
+                cfg["endpoint"],
+                headers=cfg["headers"](api_key),
+                json={"query": "test", "max_results": 1},
+                timeout=20,
+            )
         if resp.status_code == cfg.get("expected_status", 200):
             return 1
         if resp.status_code in (401, 403):
