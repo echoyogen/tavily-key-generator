@@ -453,128 +453,213 @@ class TavilyService(BaseService):
                 ctx.close()
                 browser.close()
 
-    def _navigate_to_signup(self, page):
-        page.goto("https://app.tavily.com/sign-in", wait_until="domcontentloaded", timeout=30000)
-        time.sleep(2)
+    def register(self, email, password):
+        """HTTP primary path. _pre_register_hook() must NOT be inside try/except."""
+        self._pre_register_hook()  # OUTSIDE try -- solver not ready = direct raise, no fallback
 
-        html = page.content()
-        match = re.search(r'href="(/u/signup/identifier[^"]*)"', html)
-        if match:
-            signup_url = f"https://auth.tavily.com{match.group(1)}"
-            print("Navigating to signup page...")
-            page.goto(signup_url, wait_until="domcontentloaded", timeout=30000)
-            time.sleep(2)
-        else:
-            selectors = [
-                'input[name="username"]',
-                'input[name="email"]',
-                'input[type="email"]',
-            ]
-            has_email_input = any(page.query_selector(s) for s in selectors)
-            has_continue = any(
-                page.query_selector(s)
-                for s in (
-                    'button[type="submit"]',
-                    'button:has-text("Continue")',
-                    'button:has-text("Sign Up")',
-                )
+        from mail.factory import get_provider
+        sess = std_requests.Session()
+        try:
+            # Step 1: solve Turnstile for signup page
+            signup_url = "https://auth.tavily.com/u/signup"
+            token = _solve_turnstile(signup_url, TURNSTILE_SITEKEY)
+            if not token:
+                raise RuntimeError("Turnstile solve failed")
+
+            # Step 2: POST Auth0 signup
+            r = sess.post(
+                "https://auth.tavily.com/dbconnections/signup",
+                json={
+                    "client_id": "RRIAvvXNFxpfTWIozX1mXqLnyUmYSTrQ",
+                    "email": email,
+                    "password": password,
+                    "connection": "Username-Password-Authentication",
+                    "captcha": token,
+                },
+                headers={"User-Agent": "Mozilla/5.0", "Origin": "https://app.tavily.com"},
+                timeout=30,
             )
-            if has_email_input and has_continue:
-                print("Detected unified login/signup entry, using current page...")
-            else:
-                print(f"Signup entry not found: {page.url}")
+            if r.status_code not in (200, 201):
+                if r.status_code != 409:  # 409 = already exists, try login anyway
+                    raise RuntimeError(f"Auth0 signup failed: {r.status_code} {r.text[:200]}")
+
+            # Step 3: wait for verification email
+            verify_link = get_provider().get_verification_link(email, timeout=EMAIL_CODE_TIMEOUT)
+            if not verify_link:
+                raise RuntimeError("Verification email not received")
+
+            # Step 4: follow verification link
+            sess.get(
+                verify_link,
+                allow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=60,
+            )
+            time.sleep(3)
+
+            # Step 5: access dashboard and extract key
+            api_key = None
+            for url in ["https://app.tavily.com/account/api-keys", "https://app.tavily.com/app"]:
+                r2 = sess.get(url, allow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+                time.sleep(2)
+                keys = re.findall(r"tvly-[a-zA-Z0-9_-]{20,}", r2.text)
+                keys = [k for k in keys if k != "tvly-YOUR_API_KEY"]
+                if keys:
+                    api_key = max(keys, key=len)
+                    break
+            if not api_key:
+                raise RuntimeError("No tvly- key found in dashboard HTML")
+
+            self._do_post_verify(api_key)
+            self._save_result(email, password, api_key)
+            return api_key
+        except Exception as e:
+            print(f"[tavily] HTTP flow error: {e}, falling back to browser")
+            return self._browser_fallback(email, password)
+
+    def _browser_fallback(self, email, password):
+        """Browser fallback: executes full patchright-based registration flow."""
+        try:
+            browser_cm = self._open_browser()
+            browser = browser_cm.__enter__()
+            try:
+                page = browser.new_page()
+
+                # --- _navigate_to_signup ---
+                page.goto("https://app.tavily.com/sign-in", wait_until="domcontentloaded", timeout=30000)
+                time.sleep(2)
+                html = page.content()
+                match = re.search(r'href="(/u/signup/identifier[^"]*)"', html)
+                if match:
+                    nav_signup_url = f"https://auth.tavily.com{match.group(1)}"
+                    print("Navigating to signup page...")
+                    page.goto(nav_signup_url, wait_until="domcontentloaded", timeout=30000)
+                    time.sleep(2)
+                else:
+                    selectors = [
+                        'input[name="username"]',
+                        'input[name="email"]',
+                        'input[type="email"]',
+                    ]
+                    has_email_input = any(page.query_selector(s) for s in selectors)
+                    has_continue = any(
+                        page.query_selector(s)
+                        for s in (
+                            'button[type="submit"]',
+                            'button:has-text("Continue")',
+                            'button:has-text("Sign Up")',
+                        )
+                    )
+                    if has_email_input and has_continue:
+                        print("Detected unified login/signup entry, using current page...")
+                    else:
+                        print(f"Signup entry not found: {page.url}")
+
+                # --- _fill_form ---
+                email_selector = fill_first_input(
+                    page, ['input[name="email"]', 'input[name="username"]'], email
+                )
+                if not email_selector:
+                    print("Email input not found on signup page")
+                    return None
+
+                print("Handling signup page Turnstile...")
+                token1 = _solve_turnstile(page.url, sitekey=_get_turnstile_sitekey(page))
+                if not token1:
+                    print("Token acquisition failed")
+                    return None
+                print(f"Token: {token1[:50]}...")
+
+                if _inject_turnstile_token(page, token1):
+                    print("Token injected")
+                else:
+                    print("captcha input not found")
+
+                _submit_primary_action(page, email_selector)
+                time.sleep(6)
+
+                try:
+                    page.wait_for_selector('input[name="code"], input[name="password"]', timeout=15000)
+                except Exception:
+                    print("First submit did not redirect, retrying Continue...")
+                    _submit_primary_action(page)
+                    time.sleep(3)
+                    try:
+                        page.wait_for_selector('input[name="code"], input[name="password"]', timeout=20000)
+                    except Exception:
+                        feedback = _extract_page_feedback(page)
+                        print(f"Did not reach verification/password page: {page.url}")
+                        if feedback:
+                            print(f"   Page hint: {feedback}")
+                        return None
+
+                if page.query_selector('input[name="code"]'):
+                    print("Reached email verification code page")
+                    code = _get_mail_provider().get_email_code(email, timeout=EMAIL_CODE_TIMEOUT, service_hint="tavily")
+                    if not code:
+                        return None
+                    page.fill('input[name="code"]', code)
+                    _submit_primary_action(page, 'input[name="code"]')
+                    time.sleep(3)
+
+                try:
+                    page.wait_for_selector('input[name="password"]', timeout=30000)
+                    print("Reached password page")
+                except Exception:
+                    print(f"Did not reach password page: {page.url}")
+                    return None
+
+                # --- _submit_form ---
+                if not _submit_password_with_recovery(page, password):
+                    feedback = _extract_page_feedback(page)
+                    print(f"Login failed: {page.url}")
+                    if feedback:
+                        print(f"   Page hint: {feedback}")
+
+                # --- _verify_email ---
+                print("Checking for additional email verification...")
+                time.sleep(3)
+                if "verify" in page.url.lower():
+                    print("Email verification required")
+                    verify_url = _get_mail_provider().get_verification_link(email, timeout=60)
+                    if verify_url:
+                        page.goto(verify_url, wait_until="domcontentloaded", timeout=60000)
+                        page.wait_for_url("**/app.tavily.com/**", timeout=60000)
+                        time.sleep(3)
+
+                # --- _extract_api_key ---
+                print("Extracting API key...")
+                time.sleep(3)
+                api_key = _wait_for_api_key(page, timeout=API_KEY_TIMEOUT)
+                if not api_key:
+                    api_key = extract_api_key_by_pattern(page, r"tvly-[a-zA-Z0-9_-]+")
+
+                self._do_post_verify(api_key)
+                self._save_result(email, password, api_key)
+                return api_key
+            finally:
+                try:
+                    browser_cm.__exit__(None, None, None)
+                except Exception as e:
+                    print(f"[tavily] Browser cleanup: {e}")
+        except Exception as e:
+            print(f"[tavily] Browser fallback failed: {e}")
+            return None
+
+    def _navigate_to_signup(self, page):
+        raise NotImplementedError("TavilyService uses HTTP-primary flow")
 
     def _fill_form(self, page, email, password):
-        email_selector = fill_first_input(
-            page, ['input[name="email"]', 'input[name="username"]'], email
-        )
-        if not email_selector:
-            print("Email input not found on signup page")
-            return
-
-        print("Handling signup page Turnstile...")
-        token1 = _solve_turnstile(page.url, sitekey=_get_turnstile_sitekey(page))
-        if not token1:
-            print("Token acquisition failed")
-            return
-        print(f"Token: {token1[:50]}...")
-
-        if _inject_turnstile_token(page, token1):
-            print("Token injected")
-        else:
-            print("captcha input not found")
-
-        _submit_primary_action(page, email_selector)
-        time.sleep(6)
-
-        try:
-            page.wait_for_selector('input[name="code"], input[name="password"]', timeout=15000)
-        except Exception:
-            print("First submit did not redirect, retrying Continue...")
-            _submit_primary_action(page)
-            time.sleep(3)
-
-            try:
-                page.wait_for_selector('input[name="code"], input[name="password"]', timeout=20000)
-            except Exception:
-                feedback = _extract_page_feedback(page)
-                print(f"Did not reach verification/password page: {page.url}")
-                if feedback:
-                    print(f"   Page hint: {feedback}")
-                return
-
-        if page.query_selector('input[name="code"]'):
-            print("Reached email verification code page")
-            code = _get_mail_provider().get_email_code(email, timeout=EMAIL_CODE_TIMEOUT, service_hint="tavily")
-            if not code:
-                return
-
-            page.fill('input[name="code"]', code)
-            _submit_primary_action(page, 'input[name="code"]')
-            time.sleep(3)
-
-        try:
-            page.wait_for_selector('input[name="password"]', timeout=30000)
-            print("Reached password page")
-        except Exception:
-            print(f"Did not reach password page: {page.url}")
-            return
-
-        self._password = password
+        raise NotImplementedError("TavilyService uses HTTP-primary flow")
 
     def _submit_form(self, page):
-        password = getattr(self, "_password", None)
-        if not password:
-            return
-
-        if not _submit_password_with_recovery(page, password):
-            feedback = _extract_page_feedback(page)
-            print(f"Login failed: {page.url}")
-            if feedback:
-                print(f"   Page hint: {feedback}")
+        raise NotImplementedError("TavilyService uses HTTP-primary flow")
 
     def _verify_email(self, page, email):
-        print("Checking for additional email verification...")
-        time.sleep(3)
-        if "verify" not in page.url.lower():
-            return
-
-        print("Email verification required")
-        verify_url = _get_mail_provider().get_verification_link(email, timeout=60)
-        if not verify_url:
-            return
-
-        page.goto(verify_url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_url("**/app.tavily.com/**", timeout=60000)
-        time.sleep(3)
+        raise NotImplementedError("TavilyService uses HTTP-primary flow")
 
     def _extract_api_key(self, page):
-        print("Extracting API key...")
-        time.sleep(3)
-        api_key = _wait_for_api_key(page, timeout=API_KEY_TIMEOUT)
-        if api_key:
-            return api_key
-        return extract_api_key_by_pattern(page, r"tvly-[a-zA-Z0-9_-]+")
+        raise NotImplementedError("TavilyService uses HTTP-primary flow")
 
     def _do_post_verify(self, api_key):
         _verify_key(

@@ -131,11 +131,19 @@ class TestTavilyServiceWaitStrategy(unittest.TestCase):
         from services.tavily.service import TavilyService
         service = TavilyService()
 
-        with patch("time.sleep"):
-            self.mock_page.content.return_value = "<html></html>"
-            self.mock_page.query_selector.return_value = None
+        self.mock_page.content.return_value = "<html></html>"
+        self.mock_page.query_selector.return_value = None
 
-            service._navigate_to_signup(self.mock_page)
+        mock_browser = MagicMock()
+        mock_browser.new_page.return_value = self.mock_page
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=mock_browser)
+        mock_cm.__exit__ = MagicMock(return_value=False)
+
+        with patch("time.sleep"), \
+             patch.object(service, '_open_browser', return_value=mock_cm), \
+             patch("services.tavily.service.fill_first_input", return_value=None):
+            service._browser_fallback("test@example.com", "Pass123!")
 
         sign_in_call = None
         for c in self.mock_page.goto.call_args_list:
@@ -171,11 +179,19 @@ class TestTavilyServiceWaitStrategy(unittest.TestCase):
         signup_path = '/u/signup/identifier?flow=signup'
         html_with_signup = f'<html><a href="{signup_path}">Sign up</a></html>'
 
-        with patch("time.sleep"):
-            self.mock_page.content.return_value = html_with_signup
-            self.mock_page.query_selector.return_value = None
+        self.mock_page.content.return_value = html_with_signup
+        self.mock_page.query_selector.return_value = None
 
-            service._navigate_to_signup(self.mock_page)
+        mock_browser = MagicMock()
+        mock_browser.new_page.return_value = self.mock_page
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=mock_browser)
+        mock_cm.__exit__ = MagicMock(return_value=False)
+
+        with patch("time.sleep"), \
+             patch.object(service, '_open_browser', return_value=mock_cm), \
+             patch("services.tavily.service.fill_first_input", return_value=None):
+            service._browser_fallback("test@example.com", "Pass123!")
 
         signup_call = None
         for c in self.mock_page.goto.call_args_list:
@@ -210,16 +226,33 @@ class TestTavilyServiceWaitStrategy(unittest.TestCase):
 
         verify_url = "https://app.tavily.com/verify?token=abc123"
 
+        self.mock_page.content.return_value = "<html></html>"
+        self.mock_page.query_selector.return_value = None
+        self.mock_page.url = "https://app.tavily.com/verify"
+
+        mock_browser = MagicMock()
+        mock_browser.new_page.return_value = self.mock_page
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=mock_browser)
+        mock_cm.__exit__ = MagicMock(return_value=False)
+
+        mock_provider = MagicMock()
+        mock_provider.get_verification_link.return_value = verify_url
+
         with patch("time.sleep"), \
-             patch("services.tavily.service._get_mail_provider") as mock_provider_factory:
-
-            mock_provider = MagicMock()
-            mock_provider.get_verification_link.return_value = verify_url
-            mock_provider_factory.return_value = mock_provider
-
-            self.mock_page.url = "https://app.tavily.com/verify"
-
-            service._verify_email(self.mock_page, "test@example.com")
+             patch.object(service, '_open_browser', return_value=mock_cm), \
+             patch("services.tavily.service.fill_first_input", return_value='input[name="email"]'), \
+             patch("services.tavily.service._solve_turnstile", return_value="fake-token"), \
+             patch("services.tavily.service._inject_turnstile_token", return_value=True), \
+             patch("services.tavily.service._submit_primary_action", return_value=True), \
+             patch("services.tavily.service._get_turnstile_sitekey", return_value="0x4AAAAAAAQFNSW6xordsuIq"), \
+             patch("services.tavily.service._submit_password_with_recovery", return_value=True), \
+             patch("services.tavily.service._get_mail_provider", return_value=mock_provider), \
+             patch("services.tavily.service._wait_for_api_key", return_value=None), \
+             patch("services.tavily.service.extract_api_key_by_pattern", return_value=None), \
+             patch.object(service, '_do_post_verify'), \
+             patch.object(service, '_save_result'):
+            service._browser_fallback("test@example.com", "Pass123!")
 
         verify_call = None
         for c in self.mock_page.goto.call_args_list:
@@ -248,16 +281,33 @@ class TestTavilyServiceWaitStrategy(unittest.TestCase):
 
         verify_url = "https://app.tavily.com/verify?token=abc123"
 
+        self.mock_page.content.return_value = "<html></html>"
+        self.mock_page.query_selector.return_value = None
+        self.mock_page.url = "https://app.tavily.com/verify"
+
+        mock_browser = MagicMock()
+        mock_browser.new_page.return_value = self.mock_page
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=mock_browser)
+        mock_cm.__exit__ = MagicMock(return_value=False)
+
+        mock_provider = MagicMock()
+        mock_provider.get_verification_link.return_value = verify_url
+
         with patch("time.sleep"), \
-             patch("services.tavily.service._get_mail_provider") as mock_provider_factory:
-
-            mock_provider = MagicMock()
-            mock_provider.get_verification_link.return_value = verify_url
-            mock_provider_factory.return_value = mock_provider
-
-            self.mock_page.url = "https://app.tavily.com/verify"
-
-            service._verify_email(self.mock_page, "test@example.com")
+             patch.object(service, '_open_browser', return_value=mock_cm), \
+             patch("services.tavily.service.fill_first_input", return_value='input[name="email"]'), \
+             patch("services.tavily.service._solve_turnstile", return_value="fake-token"), \
+             patch("services.tavily.service._inject_turnstile_token", return_value=True), \
+             patch("services.tavily.service._submit_primary_action", return_value=True), \
+             patch("services.tavily.service._get_turnstile_sitekey", return_value="0x4AAAAAAAQFNSW6xordsuIq"), \
+             patch("services.tavily.service._submit_password_with_recovery", return_value=True), \
+             patch("services.tavily.service._get_mail_provider", return_value=mock_provider), \
+             patch("services.tavily.service._wait_for_api_key", return_value=None), \
+             patch("services.tavily.service.extract_api_key_by_pattern", return_value=None), \
+             patch.object(service, '_do_post_verify'), \
+             patch.object(service, '_save_result'):
+            service._browser_fallback("test@example.com", "Pass123!")
 
         verify_call = None
         for c in self.mock_page.goto.call_args_list:

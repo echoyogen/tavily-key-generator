@@ -50,7 +50,22 @@ class FirecrawlService(BaseService):
             return self._browser_fallback(email, password)
 
     def _navigate_to_signup(self, page):
-        raise NotImplementedError("FirecrawlService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
+        page.goto("https://firecrawl.dev/", wait_until="domcontentloaded", timeout=30000)
+        time.sleep(2)
+
+        signup_selectors = [
+            'a:has-text("Sign up")',
+            'a:has-text("Sign Up")',
+            'button:has-text("Sign up")',
+            'a[href*="signup"]',
+            'a[href*="register"]',
+        ]
+
+        for selector in signup_selectors:
+            if page.query_selector(selector):
+                page.click(selector)
+                time.sleep(3)
+                break
 
     def _fill_form(self, page, email, password):
         raise NotImplementedError("FirecrawlService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
@@ -59,10 +74,80 @@ class FirecrawlService(BaseService):
         raise NotImplementedError("FirecrawlService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
 
     def _verify_email(self, page, email):
-        raise NotImplementedError("FirecrawlService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
+        from mail.factory import get_provider
+        provider = get_provider()
+
+        import config
+        verify_url = provider.get_verification_link(email, timeout=config.EMAIL_CODE_TIMEOUT)
+        if not verify_url:
+            print("Verification email not received")
+            return
+
+        page.goto(verify_url, wait_until="domcontentloaded", timeout=60000)
+        time.sleep(5)
+
+        current_url = page.url.lower()
+        if "login" in current_url or "signin" in current_url:
+            fill_first_input(
+                page,
+                ['input[name="email"]', 'input[type="email"]'],
+                email,
+            )
+            time.sleep(1)
+
+            password_input = page.query_selector('input[name="password"]') or page.query_selector('input[type="password"]')
+            if password_input:
+                password_val = getattr(self, "_last_password", "")
+                fill_first_input(
+                    page,
+                    ['input[name="password"]', 'input[type="password"]'],
+                    password_val,
+                )
+                time.sleep(1)
+
+            submit_form(page)
+            time.sleep(5)
 
     def _extract_api_key(self, page):
-        raise NotImplementedError("FirecrawlService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
+        api_key = extract_api_key_by_pattern(page, r"fc-[a-zA-Z0-9_-]{20,}")
+        if api_key:
+            return api_key
+
+        api_key_nav_selectors = [
+            'a:has-text("API Keys")',
+            'a[href*="api-key"]',
+            'a[href*="apikey"]',
+            'a[href*="keys"]',
+            'button:has-text("API Keys")',
+        ]
+
+        found_nav = False
+        for selector in api_key_nav_selectors:
+            if page.query_selector(selector):
+                page.click(selector)
+                time.sleep(3)
+                found_nav = True
+                break
+
+        if not found_nav:
+            possible_urls = [
+                "https://www.firecrawl.dev/app/api-keys",
+                "https://www.firecrawl.dev/app/settings",
+                "https://www.firecrawl.dev/app",
+                "https://firecrawl.dev/dashboard/api-keys",
+                "https://firecrawl.dev/api-keys",
+                "https://app.firecrawl.dev/api-keys",
+            ]
+            for url in possible_urls:
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                    time.sleep(3)
+                    if "api" in page.url.lower() and "key" in page.url.lower():
+                        break
+                except Exception:
+                    continue
+
+        return extract_api_key_by_pattern(page, r"fc-[a-zA-Z0-9_-]{20,}")
 
     def _browser_fallback(self, email, password):
         """Browser fallback: executes full browser-based registration flow."""
