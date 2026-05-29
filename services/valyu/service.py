@@ -1,259 +1,169 @@
+"""
+ValyuService — HTTP 主路径 + 浏览器 Fallback
+
+认证链路：
+  1. GET  platform.valyu.ai/auth (warm-up，Cloudflare cookie 设置)
+  2. GET  platform.valyu.ai/onboarding?email=...&provider=email (提取 next-action ID)
+  3. POST platform.valyu.ai/onboarding?email=...&provider=email (Server Action，触发验证邮件)
+       → 失败时降级: POST auth.valyu.ai/auth/v1/signup (Supabase 直连)
+  4. 收取验证邮件中的 magic link (mail provider)
+  5. GET  验证链接 (auth.valyu.ai/auth/v1/verify?token=...)，跟随重定向到 platform
+  6. POST auth.valyu.ai/auth/v1/token?grant_type=password (密码登录，获取 access_token)
+  7. GET  platform.valyu.ai/user/account/apikeys (提取或创建 API key)
+  → 全链路失败时: Camoufox 浏览器完成 11 步 onboarding
+"""
+
+import html as _html_mod
+import random
 import re
+import string
 import time
 
-from services.base import BaseService
-from services.common.browser import fill_first_input, attach_response_tracker
-from services.common.api_verifier import verify_api_key
+import requests
 
+import config
+from services.base import BaseService
+
+# 常量
+SUPABASE_URL = "https://auth.valyu.ai"
+SUPABASE_ANON_KEY = "sb_publishable_8AbrTfadTWE6iBwyjzK2TA_mJJbL0G6"
+PLATFORM_URL = "https://platform.valyu.ai"
+_FALLBACK_ACTION_ID = "4049b0f006c0cc849cd70fb479842ca0d4c4bbade9"
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 _VALYU_KEY_RE = re.compile(r'val[a-z_]*[A-Za-z0-9_-]{20,}')
 
+# 名字池和选项池（tuple，不可变全局状态）
+_FIRST_NAMES = (
+    "James", "Emma", "Liam", "Olivia", "Noah", "Ava", "William", "Sophia",
+    "Benjamin", "Isabella", "Lucas", "Mia", "Henry", "Charlotte", "Alexander",
+    "David", "Sarah", "Michael", "Emily", "Daniel", "Jessica", "Matthew",
+    "Ashley", "Andrew", "Hannah", "Ryan", "Samantha", "Kevin", "Rachel",
+)
+_LAST_NAMES = (
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
+    "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez",
+    "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin",
+    "Lee", "Perez", "Thompson", "White", "Harris", "Sanchez", "Clark",
+)
+_HEARD_FROM = (
+    "linkedin", "twitter", "reddit", "search", "github", "friend", "other",
+)
+_ROLES = (
+    "ai_developer", "non_ai_developer", "founder_cto", "vibe_coder", "researcher", "other",
+)
+_INDUSTRIES = (
+    "technology", "finance", "healthcare", "education", "research", "media_entertainment", "other",
+)
+_TECHNOLOGIES = (
+    "ai_sdk", "openai_sdk", "langchain", "mcp", "n8n", "non_technical",
+)
 
-def _detect_signup_result(page, signup_events):
-    snapshots = []
-    current_url = page.url.lower()
-
-    if "confirm-email" in current_url or "check-email" in current_url:
-        return ("sent", "")
-
-    try:
-        snapshots.append(page.locator("body").inner_text())
-    except Exception:
-        pass
-
-    try:
-        snapshots.append(page.content())
-    except Exception:
-        pass
-
-    snapshots.extend(event.get("body", "") for event in signup_events[-6:])
-    combined = "\n".join(snapshots).lower()
-
-    for event in signup_events[-6:]:
-        if event.get("status") == 422:
-            body_lower = event.get("body", "").lower()
-            return (
-                "disposable_rejected",
-                f"Supabase returned HTTP 422, possibly rejected disposable email domain: {body_lower[:200]}",
-            )
-
-    if "invalid email domain" in combined or ("email domain" in combined and "not allowed" in combined):
-        return ("disposable_rejected", "valyu.ai (Supabase) rejected the email domain.")
-
-    if "email already registered" in combined or "already registered" in combined or "user already registered" in combined:
-        return ("exists", "This email is already registered.")
-
-    success_markers = (
-        "check your email",
-        "confirmation link",
-        "verify your email",
-        "verification email",
-        "email has been sent",
-        "we sent you an email",
-        "confirm your email",
-    )
-    if any(marker in combined for marker in success_markers):
-        return ("sent", "")
-
-    return ("", "")
-
-
-def _wait_for_signup_result(page, signup_events, timeout=15):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        status, message = _detect_signup_result(page, signup_events)
-        if status:
-            return status, message
-        time.sleep(1)
-
-    current_url = page.url.lower()
-    if "confirm-email" in current_url or "check-email" in current_url:
-        return ("sent", "")
-
-    return ("", "")
+# Header 字典
+_NAV_HEADERS = {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "user-agent": _UA,
+}
+_SUPABASE_HEADERS = {
+    "accept": "application/json",
+    "apikey": SUPABASE_ANON_KEY,
+    "content-type": "application/json",
+    "user-agent": _UA,
+}
+_PLATFORM_CORS_HEADERS = {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "origin": PLATFORM_URL,
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+    "user-agent": _UA,
+}
 
 
 class ValyuService(BaseService):
     name = "valyu"
-    signup_url = "https://www.valyu.network/"
+    signup_url = "https://platform.valyu.ai/auth"
     api_key_prefix = "valyu-"
     output_file = "valyu_accounts.txt"
     headless_config_key = "VALYU_REGISTER_HEADLESS"
 
-    def _navigate_to_signup(self, page):
-        self._signup_events = attach_response_tracker(
-            page, ("signup", "auth", "register", "supabase")
-        )
+    # ------------------------------------------------------------------
+    # 主入口 (Task 6)
+    # ------------------------------------------------------------------
 
-        print("Navigating to signup page...")
-        page.goto("https://platform.valyu.ai/auth/signup", wait_until="domcontentloaded", timeout=30000)
-        time.sleep(2)
+    def register(self, email, password):
+        pass  # Task 6
 
-    def _fill_form(self, page, email, password):
-        print("Filling registration form...")
+    # ------------------------------------------------------------------
+    # HTTP 初始化组 (Task 2)
+    # ------------------------------------------------------------------
 
-        email_selector = fill_first_input(
-            page,
-            ['input[type="email"]', 'input[name="email"]'],
-            email,
-        )
-        if not email_selector:
-            print("Email input not found")
-            return
+    def _warm_up(self, sess):
+        pass  # Task 2
 
-        time.sleep(1)
+    def _get_onboarding_page_html(self, sess, email):
+        pass  # Task 2
 
-        password_selector = fill_first_input(
-            page,
-            ['input[type="password"]', 'input[name="password"]'],
-            password,
-        )
-        if not password_selector:
-            print("Password input not found")
-            return
+    def _submit_onboarding(self, sess, email, password):
+        pass  # Task 2
 
-        time.sleep(1)
+    def _supabase_signup_fallback(self, sess, email, password):
+        pass  # Task 2
 
-        confirm_selector = page.query_selector(
-            'input[name="confirmPassword"], input[placeholder*="confirm" i]'
-        )
-        if confirm_selector:
-            confirm_selector.fill(password)
-            time.sleep(1)
+    # ------------------------------------------------------------------
+    # 验证组 (Task 3)
+    # ------------------------------------------------------------------
 
-    def _submit_form(self, page):
-        print("Submitting registration...")
-        submitted = False
-        for selector in [
-            'button[type="submit"]',
-            'button:has-text("Sign up")',
-            'button:has-text("Create Account")',
-            'button:has-text("Register")',
-        ]:
-            if page.query_selector(selector):
-                try:
-                    page.click(selector, timeout=3000)
-                    submitted = True
-                    break
-                except Exception:
-                    continue
+    def _wait_and_verify_email(self, email):
+        pass  # Task 3
 
-        if not submitted:
-            print("Submit button not found")
-            return
+    def _verify_via_link(self, sess, link):
+        pass  # Task 3
 
-        signup_events = getattr(self, "_signup_events", [])
-        status, msg = _wait_for_signup_result(page, signup_events)
+    def _password_login(self, sess, email, password):
+        pass  # Task 3
 
-        if status == "disposable_rejected":
-            print("Warning: valyu.ai (Supabase) rejected disposable email domain")
-            return
+    # ------------------------------------------------------------------
+    # Key 获取组 (Task 4)
+    # ------------------------------------------------------------------
 
-        if status == "exists":
-            if msg:
-                print(f"Error: {msg}")
-            return
+    def _extract_valyu_key(self, text):
+        pass  # Task 4
 
-        if status != "sent":
-            for event in signup_events:
-                if event.get("status") == 422:
-                    print("Warning: valyu.ai (Supabase) rejected disposable email domain")
-                    return
-            if msg:
-                print(f"Error: {msg}")
-
-    def _verify_email(self, page, email):
-        from mail.factory import get_provider
-        provider = get_provider()
-
-        import config
-        print(f"Waiting for verification email (up to {config.EMAIL_CODE_TIMEOUT}s)...")
-        verify_url = provider.get_verification_link(email, timeout=config.EMAIL_CODE_TIMEOUT)
-        if not verify_url:
-            print("Error: Verification email not received")
-            return
-
-        print(f"Received verification link: {verify_url[:50]}...")
-        print("Navigating to verification link...")
-        page.goto(verify_url, wait_until="domcontentloaded", timeout=60000)
-        time.sleep(5)
-
-        current_url = page.url.lower()
-        if "platform.valyu.ai" not in current_url:
-            print(f"Warning: Did not redirect to platform.valyu.ai after verification, current URL: {page.url}")
-            time.sleep(3)
-
-        print("Navigating to API keys page...")
-        page.goto("https://platform.valyu.ai/user/account/apikeys", wait_until="domcontentloaded", timeout=30000)
-        time.sleep(3)
-
-        create_selectors = [
-            'button:has-text("Create")',
-            'button:has-text("New API Key")',
-            'button:has-text("Generate")',
-            '[data-testid="create-api-key"]',
-        ]
-        for selector in create_selectors:
-            if page.query_selector(selector):
-                page.click(selector)
-                time.sleep(2)
-                name_input = page.query_selector('input[name="name"], input[placeholder*="name" i]')
-                if name_input:
-                    name_input.fill("auto-generated-key")
-                    time.sleep(1)
-                    for cs in [
-                        'button:has-text("Create")',
-                        'button:has-text("Generate")',
-                        'button:has-text("Confirm")',
-                        'button[type="submit"]',
-                    ]:
-                        if page.query_selector(cs):
-                            page.click(cs)
-                            time.sleep(3)
-                            break
-                break
-
-    def _extract_api_key(self, page):
-        print("Looking for API key...")
-        try:
-            time.sleep(3)
-
-            selectors = [
-                'input[type="text"]',
-                'code',
-                '[data-testid*="key"]',
-                '.api-key',
-                'input[readonly]',
-            ]
-
-            for selector in selectors:
-                elements = page.query_selector_all(selector)
-                for element in elements:
-                    try:
-                        text = element.inner_text() or element.get_attribute('value') or ''
-                    except Exception:
-                        text = ''
-                    match = _VALYU_KEY_RE.search(text)
-                    if match:
-                        return match.group(0)
-
-            html = page.content()
-            matches = _VALYU_KEY_RE.findall(html)
-            if matches:
-                return matches[0]
-
-            print("Error: Could not extract API key")
-            return None
-        except Exception as e:
-            print(f"API key extraction failed: {e}")
-            return None
+    def _fetch_api_key_http(self, sess, access_token):
+        pass  # Task 4
 
     def _do_post_verify(self, api_key):
-        result = verify_api_key(
-            api_key,
-            "https://api.valyu.ai/v1/search",
-            lambda k: {"x-api-key": k, "Content-Type": "application/json"},
-        )
-        if result is False:
-            print("Warning: API key verification failed, saving anyway")
-        elif result is None:
-            print("Warning: API key availability could not be confirmed (likely network issue), saving anyway")
+        pass  # Task 4
+
+    def _save_result(self, email, password, api_key):
+        pass  # Task 4
+
+    # ------------------------------------------------------------------
+    # 浏览器 fallback (Task 5)
+    # ------------------------------------------------------------------
+
+    def _browser_fallback(self, email, password):
+        pass  # Task 5
+
+    # ------------------------------------------------------------------
+    # Abstract method stubs (Task 5)
+    # ------------------------------------------------------------------
+
+    def _open_browser(self):
+        raise NotImplementedError("ValyuService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
+
+    def _navigate_to_signup(self, page):
+        raise NotImplementedError("ValyuService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
+
+    def _fill_form(self, page, email, password):
+        raise NotImplementedError("ValyuService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
+
+    def _submit_form(self, page):
+        raise NotImplementedError("ValyuService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
+
+    def _verify_email(self, page, email):
+        raise NotImplementedError("ValyuService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
+
+    def _extract_api_key(self, page):
+        raise NotImplementedError("ValyuService uses HTTP-primary flow; _browser_fallback() handles browser path directly")
