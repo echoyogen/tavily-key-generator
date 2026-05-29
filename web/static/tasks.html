@@ -7,18 +7,21 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/static/js/common.js"></script>
 </head>
-<body class="min-h-screen bg-gray-950 text-gray-200">
+<body class="bg-gray-50 min-h-screen">
 
-  <nav class="bg-gray-900 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
-    <div class="flex items-center gap-6">
-      <span class="text-white font-bold text-lg">🔑 Key 管理平台</span>
-      <a href="/" class="text-gray-400 hover:text-gray-200 text-sm">Dashboard</a>
-      <a href="/accounts" class="text-gray-400 hover:text-gray-200 text-sm">账号管理</a>
-      <a href="/tasks" class="text-blue-400 text-sm font-medium">注册任务</a>
-      <a href="/mail" class="text-gray-400 hover:text-gray-200 text-sm">邮箱订单</a>
-      <a href="/schedule" class="text-gray-400 hover:text-gray-200 text-sm">定时任务</a>
+  <nav class="bg-white shadow-sm border-b border-gray-200">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-6">
+        <span class="text-lg font-bold text-gray-800">API Key 管理</span>
+        <a href="/" class="text-sm text-gray-500 hover:text-gray-700">概览</a>
+        <a href="/accounts" class="text-sm text-gray-500 hover:text-gray-700">账号</a>
+        <a href="/tasks" class="text-sm font-medium text-blue-600 border-b-2 border-blue-600 pb-1">任务</a>
+        <a href="/mail" class="text-sm text-gray-500 hover:text-gray-700">邮件服务商</a>
+        <a href="/mail-usages" class="text-sm text-gray-500 hover:text-gray-700">邮箱记录</a>
+        <a href="/schedule" class="text-sm text-gray-500 hover:text-gray-700">定时任务</a>
+      </div>
+      <button onclick="clearToken(); window.location.href='/login'" class="text-sm text-gray-500 hover:text-red-500">退出</button>
     </div>
-    <button onclick="clearToken(); window.location.href='/login'" class="text-gray-500 hover:text-red-400 text-sm transition">退出登录</button>
   </nav>
 
   <div x-data="tasksApp()" class="max-w-7xl mx-auto px-6 py-6">
@@ -27,13 +30,13 @@
 
       <!-- 左侧：创建任务表单 -->
       <div class="lg:col-span-1">
-        <div class="bg-gray-900 border border-gray-700 rounded-xl p-5">
-          <h2 class="text-base font-semibold text-white mb-4">创建注册任务</h2>
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h2 class="text-base font-semibold text-gray-900 mb-4">创建注册任务</h2>
           <form @submit.prevent="createTask">
             <div class="mb-4">
-              <label class="block text-xs text-gray-400 mb-1">目标平台</label>
+              <label class="block text-xs text-gray-500 mb-1">目标平台</label>
               <select x-model="form.service"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white">
+                class="w-full border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 px-3 py-2 text-sm">
                 <option value="tavily">Tavily</option>
                 <option value="firecrawl">Firecrawl</option>
                 <option value="exa">Exa</option>
@@ -43,26 +46,26 @@
               </select>
             </div>
             <div class="mb-4">
-              <label class="block text-xs text-gray-400 mb-1">注册数量</label>
+              <label class="block text-xs text-gray-500 mb-1">注册数量</label>
               <input x-model.number="form.count" type="number" min="1" max="500"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+                class="w-full border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 px-3 py-2 text-sm" />
             </div>
             <div class="mb-4">
-              <label class="block text-xs text-gray-400 mb-1">并发数</label>
+              <label class="block text-xs text-gray-500 mb-1">并发数</label>
               <input x-model.number="form.concurrency" type="number" min="1" max="20"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+                class="w-full border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 px-3 py-2 text-sm" />
             </div>
             <div class="mb-4">
-              <label class="block text-xs text-gray-400 mb-1">任务间隔（秒）</label>
+              <label class="block text-xs text-gray-500 mb-1">任务间隔（秒）</label>
               <input x-model.number="form.delay" type="number" min="0" max="300"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+                class="w-full border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 px-3 py-2 text-sm" />
             </div>
             <div class="mb-5 flex items-center gap-2">
               <input type="checkbox" x-model="form.upload" id="upload" class="rounded" />
-              <label for="upload" class="text-sm text-gray-300">完成后上传到 Key 池</label>
+              <label for="upload" class="text-sm text-gray-700">完成后上传到 Key 池</label>
             </div>
             <button type="submit" :disabled="creating"
-              class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 text-white font-semibold py-2 rounded-lg transition">
+              class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-2 rounded-lg transition">
               <span x-text="creating ? '提交中...' : '🚀 提交任务'"></span>
             </button>
           </form>
@@ -73,28 +76,28 @@
       <div class="lg:col-span-2 flex flex-col gap-4">
 
         <!-- 任务列表 -->
-        <div class="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
-          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-            <h2 class="text-base font-semibold text-white">最近任务</h2>
-            <button @click="loadTasks()" class="text-gray-400 hover:text-white text-xs transition">刷新</button>
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <h2 class="text-base font-semibold text-gray-900">最近任务</h2>
+            <button @click="loadTasks()" class="text-gray-400 hover:text-gray-700 text-xs transition">刷新</button>
           </div>
-          <div class="divide-y divide-gray-800 max-h-64 overflow-y-auto">
+          <div class="divide-y divide-gray-100 max-h-64 overflow-y-auto">
             <template x-if="tasks.length === 0">
               <div class="text-center py-8 text-gray-500 text-sm">暂无任务</div>
             </template>
             <template x-for="task in tasks" :key="task.id">
-              <div class="px-4 py-3 hover:bg-gray-800/50 transition cursor-pointer"
+              <div class="px-4 py-3 hover:bg-gray-50 transition cursor-pointer"
                    @click="selectTask(task)">
                 <div class="flex items-center justify-between mb-1">
                   <div class="flex items-center gap-2">
-                    <span class="text-xs font-medium text-blue-300" x-text="serviceLabel(task.service)"></span>
+                    <span class="text-xs font-medium text-blue-600" x-text="serviceLabel(task.service)"></span>
                     <span x-html="taskStatusLabel(task.status)"></span>
                   </div>
                   <span class="text-xs text-gray-500" x-text="fmtDateShort(task.created_at)"></span>
                 </div>
                 <div class="flex items-center justify-between text-xs text-gray-400">
                   <span>
-                    进度: <span class="text-white" x-text="task.success + task.failed"></span>/<span x-text="task.total"></span>
+                    进度: <span class="text-gray-700" x-text="task.success + task.failed"></span>/<span x-text="task.total"></span>
                     &nbsp;✅<span x-text="task.success"></span>
                     &nbsp;❌<span x-text="task.failed"></span>
                   </span>
@@ -105,7 +108,7 @@
                   </div>
                 </div>
                 <!-- 进度条 -->
-                <div class="mt-2 h-1 bg-gray-700 rounded-full overflow-hidden">
+                <div class="mt-2 h-1 bg-gray-200 rounded-full overflow-hidden">
                   <div class="h-full bg-blue-500 rounded-full transition-all"
                        :style="`width: ${task.total > 0 ? Math.round((task.success + task.failed)/task.total*100) : 0}%`"></div>
                 </div>
@@ -115,9 +118,9 @@
         </div>
 
         <!-- 实时日志 -->
-        <div class="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden flex flex-col" style="min-height:320px">
-          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-            <h2 class="text-base font-semibold text-white">
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col" style="min-height:320px">
+          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <h2 class="text-base font-semibold text-gray-900">
               实时日志
               <span x-show="selectedTask" class="text-xs text-gray-400 ml-2">
                 任务 #<span x-text="selectedTask?.id"></span>
@@ -126,7 +129,7 @@
             </h2>
             <div class="flex items-center gap-3">
               <div x-show="streamActive" class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <button @click="clearLogs()" class="text-gray-400 hover:text-white text-xs transition">清空</button>
+              <button @click="clearLogs()" class="text-gray-400 hover:text-gray-700 text-xs transition">清空</button>
             </div>
           </div>
           <div x-show="!selectedTask" class="flex-1 flex items-center justify-center text-gray-500 text-sm">
@@ -248,8 +251,7 @@
             this._eventSource = es;
 
             es.onmessage = (e) => {
-              const lines = e.data.split('\n');
-              const log = { id: parseInt(lines[0].replace('id:', '')), level: lines[1].replace('level:', ''), message: lines.slice(2).join('\n'), created_at: new Date().toISOString() };
+              const log = JSON.parse(e.data);
               cursor = log.id;
               this.logs.push(log);
               // 滚动到底部

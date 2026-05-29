@@ -7,18 +7,21 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/static/js/common.js"></script>
 </head>
-<body class="min-h-screen bg-gray-950 text-gray-200">
+<body class="bg-gray-50 min-h-screen">
 
-  <nav class="bg-gray-900 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
-    <div class="flex items-center gap-6">
-      <span class="text-white font-bold text-lg">🔑 Key 管理平台</span>
-      <a href="/" class="text-gray-400 hover:text-gray-200 text-sm">Dashboard</a>
-      <a href="/accounts" class="text-gray-400 hover:text-gray-200 text-sm">账号管理</a>
-      <a href="/tasks" class="text-gray-400 hover:text-gray-200 text-sm">注册任务</a>
-      <a href="/mail" class="text-gray-400 hover:text-gray-200 text-sm">邮箱订单</a>
-      <a href="/schedule" class="text-blue-400 text-sm font-medium">定时任务</a>
+  <nav class="bg-white shadow-sm border-b border-gray-200">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-6">
+        <span class="text-lg font-bold text-gray-800">API Key 管理</span>
+        <a href="/" class="text-sm text-gray-500 hover:text-gray-700">概览</a>
+        <a href="/accounts" class="text-sm text-gray-500 hover:text-gray-700">账号</a>
+        <a href="/tasks" class="text-sm text-gray-500 hover:text-gray-700">任务</a>
+        <a href="/mail" class="text-sm text-gray-500 hover:text-gray-700">邮件服务商</a>
+        <a href="/mail-usages" class="text-sm text-gray-500 hover:text-gray-700">邮箱记录</a>
+        <a href="/schedule" class="text-sm font-medium text-blue-600 border-b-2 border-blue-600 pb-1">定时任务</a>
+      </div>
+      <button onclick="clearToken(); window.location.href='/login'" class="text-sm text-gray-500 hover:text-red-500">退出</button>
     </div>
-    <button onclick="clearToken(); window.location.href='/login'" class="text-gray-500 hover:text-red-400 text-sm transition">退出登录</button>
   </nav>
 
   <div x-data="scheduleApp()" class="max-w-6xl mx-auto px-6 py-6">
@@ -27,15 +30,15 @@
 
       <!-- 左侧：创建定时任务 -->
       <div class="lg:col-span-1">
-        <div class="bg-gray-900 border border-gray-700 rounded-xl p-5">
-          <h2 class="text-base font-semibold text-white mb-4">
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h2 class="text-base font-semibold text-gray-900 mb-4">
             <span x-text="editId ? '编辑定时任务' : '新建定时任务'"></span>
           </h2>
           <form @submit.prevent="save">
             <div class="mb-3">
-              <label class="block text-xs text-gray-400 mb-1">目标平台</label>
+              <label class="block text-xs text-gray-500 mb-1">目标平台</label>
               <select x-model="form.service" :disabled="!!editId"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white disabled:opacity-60">
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 disabled:opacity-60 focus:ring-2 focus:ring-blue-500">
                 <option value="tavily">Tavily</option>
                 <option value="firecrawl">Firecrawl</option>
                 <option value="exa">Exa</option>
@@ -45,54 +48,54 @@
               </select>
             </div>
             <div class="mb-3">
-              <label class="block text-xs text-gray-400 mb-1">
+              <label class="block text-xs text-gray-500 mb-1">
                 Cron 表达式
                 <span class="text-gray-500 ml-1">（5段: 分 时 日 月 周）</span>
               </label>
               <input x-model="form.cron_expr" type="text" placeholder="0 2 * * *"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono" />
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 font-mono focus:ring-2 focus:ring-blue-500" />
               <p class="text-xs text-gray-500 mt-1" x-text="cronHint(form.cron_expr)"></p>
             </div>
 
             <!-- 快速预设 -->
             <div class="mb-3 flex flex-wrap gap-1">
-              <button type="button" @click="form.cron_expr='0 2 * * *'" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded transition">每天凌晨2点</button>
-              <button type="button" @click="form.cron_expr='0 */6 * * *'" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded transition">每6小时</button>
-              <button type="button" @click="form.cron_expr='0 8,20 * * *'" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded transition">每天8点和20点</button>
-              <button type="button" @click="form.cron_expr='0 0 * * 1'" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded transition">每周一</button>
+              <button type="button" @click="form.cron_expr='0 2 * * *'" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded transition">每天凌晨2点</button>
+              <button type="button" @click="form.cron_expr='0 */6 * * *'" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded transition">每6小时</button>
+              <button type="button" @click="form.cron_expr='0 8,20 * * *'" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded transition">每天8点和20点</button>
+              <button type="button" @click="form.cron_expr='0 0 * * 1'" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded transition">每周一</button>
             </div>
 
             <div class="mb-3">
-              <label class="block text-xs text-gray-400 mb-1">注册数量</label>
+              <label class="block text-xs text-gray-500 mb-1">注册数量</label>
               <input x-model.number="form.count" type="number" min="1"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500" />
             </div>
             <div class="mb-3">
-              <label class="block text-xs text-gray-400 mb-1">并发数</label>
+              <label class="block text-xs text-gray-500 mb-1">并发数</label>
               <input x-model.number="form.concurrency" type="number" min="1" max="20"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500" />
             </div>
             <div class="mb-3">
-              <label class="block text-xs text-gray-400 mb-1">间隔（秒）</label>
+              <label class="block text-xs text-gray-500 mb-1">间隔（秒）</label>
               <input x-model.number="form.delay" type="number" min="0"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:ring-2 focus:ring-blue-500" />
             </div>
             <div class="mb-4 flex items-center gap-2">
               <input type="checkbox" x-model="form.upload" id="s-upload" class="rounded" />
-              <label for="s-upload" class="text-sm text-gray-300">完成后上传 Key 池</label>
+              <label for="s-upload" class="text-sm text-gray-700">完成后上传 Key 池</label>
             </div>
             <div class="mb-4 flex items-center gap-2">
               <input type="checkbox" x-model="form.enabled" id="s-enabled" class="rounded" />
-              <label for="s-enabled" class="text-sm text-gray-300">启用</label>
+              <label for="s-enabled" class="text-sm text-gray-700">启用</label>
             </div>
 
             <div class="flex gap-2">
               <button type="submit" :disabled="saving"
-                class="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 text-white text-sm font-semibold py-2 rounded-lg transition"
+                class="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition"
                 x-text="saving ? '保存中...' : (editId ? '保存修改' : '创建任务')">
               </button>
               <button x-show="editId" type="button" @click="cancelEdit()"
-                class="px-3 bg-gray-700 hover:bg-gray-600 text-sm rounded-lg transition">取消</button>
+                class="px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-lg transition">取消</button>
             </div>
           </form>
         </div>
@@ -100,45 +103,45 @@
 
       <!-- 右侧：定时任务列表 -->
       <div class="lg:col-span-2">
-        <div class="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
-          <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-            <h2 class="text-base font-semibold text-white">定时任务列表</h2>
-            <button @click="load()" class="text-gray-400 hover:text-white text-xs">刷新</button>
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h2 class="text-base font-semibold text-gray-900">定时任务列表</h2>
+            <button @click="load()" class="text-gray-500 hover:text-gray-700 text-xs">刷新</button>
           </div>
 
           <template x-if="schedules.length === 0">
             <div class="text-center py-12 text-gray-500">暂无定时任务</div>
           </template>
 
-          <div class="divide-y divide-gray-800">
+          <div class="divide-y divide-gray-100">
             <template x-for="s in schedules" :key="s.id">
-              <div class="p-4 hover:bg-gray-800/30 transition">
+              <div class="p-4 hover:bg-gray-50 transition">
                 <div class="flex items-start justify-between">
                   <div class="flex-1">
                     <div class="flex items-center gap-3 mb-2">
-                      <span class="font-medium text-blue-300 text-sm" x-text="serviceLabel(s.service)"></span>
-                      <code class="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-300 font-mono" x-text="s.cron_expr"></code>
-                      <span :class="s.enabled ? 'text-green-400' : 'text-gray-500'" class="text-xs"
+                      <span class="font-medium text-blue-600 text-sm" x-text="serviceLabel(s.service)"></span>
+                      <code class="text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-700 font-mono" x-text="s.cron_expr"></code>
+                      <span :class="s.enabled ? 'text-green-600' : 'text-gray-500'" class="text-xs"
                             x-text="s.enabled ? '已启用' : '已禁用'"></span>
                     </div>
-                    <div class="text-xs text-gray-400 space-y-0.5">
-                      <div>数量: <span class="text-white" x-text="s.count"></span>
-                        &nbsp; 并发: <span class="text-white" x-text="s.concurrency"></span>
-                        &nbsp; 间隔: <span class="text-white" x-text="s.delay"></span>s
+                    <div class="text-xs text-gray-500 space-y-0.5">
+                      <div>数量: <span class="text-gray-900" x-text="s.count"></span>
+                        &nbsp; 并发: <span class="text-gray-900" x-text="s.concurrency"></span>
+                        &nbsp; 间隔: <span class="text-gray-900" x-text="s.delay"></span>s
                         &nbsp; 上传: <span x-text="s.upload ? '是' : '否'"></span>
                       </div>
                       <div x-show="s.last_run_at">上次运行: <span x-text="fmtDate(s.last_run_at)"></span></div>
-                      <div x-show="s.next_run_at">下次运行: <span class="text-yellow-300" x-text="fmtDate(s.next_run_at)"></span></div>
+                      <div x-show="s.next_run_at">下次运行: <span class="text-amber-600" x-text="fmtDate(s.next_run_at)"></span></div>
                     </div>
                   </div>
                   <div class="flex items-center gap-2 ml-4">
                     <button @click="toggleEnabled(s)"
-                      :class="s.enabled ? 'text-yellow-400 hover:text-yellow-300' : 'text-green-400 hover:text-green-300'"
+                      :class="s.enabled ? 'text-amber-500 hover:text-amber-600' : 'text-green-600 hover:text-green-700'"
                       class="text-xs transition"
                       x-text="s.enabled ? '禁用' : '启用'">
                     </button>
-                    <button @click="startEdit(s)" class="text-blue-400 hover:text-blue-300 text-xs transition">编辑</button>
-                    <button @click="deleteSchedule(s.id)" class="text-red-400 hover:text-red-300 text-xs transition">删除</button>
+                    <button @click="startEdit(s)" class="text-blue-600 hover:text-blue-700 text-xs transition">编辑</button>
+                    <button @click="deleteSchedule(s.id)" class="text-red-500 hover:text-red-600 text-xs transition">删除</button>
                   </div>
                 </div>
               </div>

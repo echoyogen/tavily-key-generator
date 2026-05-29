@@ -23,10 +23,10 @@
       <a href="/accounts" class="text-sm text-gray-500 hover:text-gray-700">账号</a>
       <a href="/tasks" class="text-sm text-gray-500 hover:text-gray-700">任务</a>
       <a href="/mail" class="text-sm font-medium text-blue-600 border-b-2 border-blue-600 pb-1">邮件服务商</a>
-      <a href="/mail-usages" class="text-sm text-gray-500 hover:text-gray-700">邮箱使用记录</a>
+      <a href="/mail-usages" class="text-sm text-gray-500 hover:text-gray-700">邮箱记录</a>
       <a href="/schedule" class="text-sm text-gray-500 hover:text-gray-700">定时任务</a>
     </div>
-    <button @click="logout()" class="text-sm text-gray-500 hover:text-red-500">退出</button>
+    <button onclick="clearToken(); location.href='/login'" class="text-sm text-gray-500 hover:text-red-500">退出</button>
   </div>
 </nav>
 
@@ -306,7 +306,6 @@ function mailApp() {
       setTimeout(() => this.toast.show = false, 3000);
     },
 
-    logout() { clearToken(); location.href = '/login'; },
   };
 }
 </script>

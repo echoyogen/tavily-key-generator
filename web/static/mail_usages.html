@@ -20,10 +20,10 @@
       <a href="/accounts" class="text-sm text-gray-500 hover:text-gray-700">账号</a>
       <a href="/tasks" class="text-sm text-gray-500 hover:text-gray-700">任务</a>
       <a href="/mail" class="text-sm text-gray-500 hover:text-gray-700">邮件服务商</a>
-      <a href="/mail-usages" class="text-sm font-medium text-blue-600 border-b-2 border-blue-600 pb-1">邮箱使用记录</a>
+      <a href="/mail-usages" class="text-sm font-medium text-blue-600 border-b-2 border-blue-600 pb-1">邮箱记录</a>
       <a href="/schedule" class="text-sm text-gray-500 hover:text-gray-700">定时任务</a>
     </div>
-    <button @click="logout()" class="text-sm text-gray-500 hover:text-red-500">退出</button>
+    <button onclick="clearToken(); location.href='/login'" class="text-sm text-gray-500 hover:text-red-500">退出</button>
   </div>
 </nav>
 
@@ -168,9 +168,10 @@
 </div>
 
 <!-- Toast -->
-<div x-show="toastShow" x-transition
-  class="fixed bottom-6 right-6 bg-green-600 text-white text-sm px-4 py-3 rounded-xl shadow-lg z-50"
-  x-text="toastMsg"></div>
+<div x-show="toast.show" x-transition
+  class="fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm text-white shadow-lg z-50"
+  :class="toast.ok ? 'bg-green-600' : 'bg-red-500'"
+  x-text="toast.msg"></div>
 
 <script>
 function usagesApp() {
@@ -180,7 +181,7 @@ function usagesApp() {
     services: ['tavily','firecrawl','exa','you','serper','valyu'],
     filter: { provider: '', service: '', status: '' },
     counts: { success: 0, failed: 0, pending: 0 },
-    toastShow: false, toastMsg: '',
+    toast: { show: false, ok: true, msg: '' },
 
     async init() {
       if (!getToken()) { location.href = '/login'; return; }
@@ -224,14 +225,16 @@ function usagesApp() {
       await this.load();
     },
 
-    copyText(text) {
-      navigator.clipboard.writeText(text).then(() => {
-        this.toastMsg = '已复制'; this.toastShow = true;
-        setTimeout(() => this.toastShow = false, 2000);
-      });
+    showToast(msg, ok = true) {
+      this.toast = { show: true, ok, msg };
+      setTimeout(() => this.toast.show = false, 3000);
     },
 
-    logout() { clearToken(); location.href = '/login'; },
+    copyText(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        this.showToast('已复制');
+      });
+    },
   };
 }
 </script>
