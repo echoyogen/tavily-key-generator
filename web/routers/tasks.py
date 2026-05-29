@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -118,8 +119,13 @@ async def stream_task_logs(
 
                 for log in logs:
                     last_id = log.id
-                    data = f"id:{log.id}\nlevel:{log.level}\n{log.message}"
-                    yield f"data: {data}\n\n"
+                    log_data = {
+                        "id": log.id,
+                        "level": log.level,
+                        "message": log.message,
+                        "created_at": log.created_at.isoformat(),
+                    }
+                    yield f"data: {json.dumps(log_data)}\n\n"
 
                 # 检查任务是否已结束
                 task = await session.get(TaskModel, task_id)

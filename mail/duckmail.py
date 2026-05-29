@@ -36,40 +36,29 @@ class DuckMailProvider(MailProvider):
         self._domain_cache = None
         self._token_cache = {}
 
-    def create_mailbox(self, prefix, domain=None):
+    def create_mailbox(self, username, domain=None):
         password = _rand_str(16)
         chosen_domain = domain or self._choose_domain()
 
-        for _ in range(5):
-            username = f"{prefix}-{_rand_str()}"
-            email = f"{username}@{chosen_domain}"
-            response = self._request(
-                "POST",
-                "/accounts",
-                json={"address": email, "password": password},
-                use_api_key=True,
-            )
+        email = f"{username}@{chosen_domain}"
+        response = self._request(
+            "POST",
+            "/accounts",
+            json={"address": email, "password": password},
+            use_api_key=True,
+        )
 
-            if response.status_code == 201:
-                account = response.json()
-                token = self._issue_token(email, password)
-                self._mailbox_cache[email] = {
-                    "account_id": account.get("id", ""),
-                    "password": password,
-                    "token": token,
-                }
-                return email, password
+        if response.status_code == 201:
+            account = response.json()
+            token = self._issue_token(email, password)
+            self._mailbox_cache[email] = {
+                "account_id": account.get("id", ""),
+                "password": password,
+                "token": token,
+            }
+            return email, password
 
-            if response.status_code not in (409, 422):
-                response.raise_for_status()
-
-            message = _response_error_message(response).lower()
-            if "exists" in message or "already" in message or response.status_code == 409:
-                continue
-
-            raise RuntimeError(f"DuckMail 创建邮箱失败: {_response_error_message(response)}")
-
-        raise RuntimeError("DuckMail 邮箱创建失败：随机地址重复次数过多")
+        raise RuntimeError(f"DuckMail 创建邮箱失败: {_response_error_message(response)}")
 
     def get_messages(self, email):
         token = self._get_token(email)

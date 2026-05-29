@@ -5,13 +5,13 @@ _ensure_deps()
 
 from cli.bootstrap import _ensure_service_browsers
 from cli.prompts import (
-    prompt_service_choice, prompt_domain_choice,
+    prompt_service_choice,
     prompt_register_count, prompt_concurrency,
     prompt_upload_choice, validate_runtime_config,
     print_runtime_summary,
 )
 from cli.orchestrator import run_register_flow, start_solver, stop_solver, signal_handler
-from mail.factory import set_domain
+
 import signal
 
 signal.signal(signal.SIGINT, signal_handler)
@@ -25,7 +25,7 @@ def main():
     need_solver = (service == "tavily")
     if not validate_runtime_config(False, show_provider_summary=True):
         return
-    prompt_domain_choice()
+
     count = prompt_register_count()
     concurrency = prompt_concurrency(count)
     upload = prompt_upload_choice()

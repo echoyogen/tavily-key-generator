@@ -17,9 +17,8 @@ class CloudflareProvider(MailProvider):
         self._api_token = api_token
         self._domain = domain
 
-    def create_mailbox(self, prefix, domain=None):
+    def create_mailbox(self, username, domain=None):
         target_domain = domain or self._domain
-        username = f"{prefix}-{_rand_str(8)}"
         email = f"{username}@{target_domain}"
         return email, ""
 

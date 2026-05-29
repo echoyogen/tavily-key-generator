@@ -19,7 +19,7 @@ from config import (
     ONLINEMAIL_API_KEY,
     ONLINEMAIL_ORDERS_FILE,
 )
-from mail.factory import get_active_domain, get_configured_domains, set_domain
+
 
 
 def prompt_service_choice():
@@ -67,38 +67,7 @@ def print_runtime_summary(service="tavily"):
         print(f"  Solver 端口: {SOLVER_PORT}")
 
 
-def prompt_domain_choice():
-    if EMAIL_PROVIDER == "onlinemail":
-        return
-    domains = get_configured_domains()
-    if not domains:
-        print(f"📮 当前域名: {get_active_domain() or '自动选择'}")
-        return
 
-    if len(domains) == 1:
-        set_domain(domains[0])
-        print(f"📮 当前域名: {domains[0]}")
-        return
-
-    print("\n检测到多个可选域名：")
-    for index, domain in enumerate(domains, start=1):
-        print(f"  {index}. {domain}")
-
-    while True:
-        print(f"请选择本轮使用的域名 (1-{len(domains)}，默认 1): ", end="")
-        raw = input().strip()
-        if raw == "":
-            choice = 1
-        elif raw.isdigit() and 1 <= int(raw) <= len(domains):
-            choice = int(raw)
-        else:
-            print("❌ 请输入有效编号")
-            continue
-
-        selected = domains[choice - 1]
-        set_domain(selected)
-        print(f"📮 已选择域名: {selected}")
-        return
 
 
 def prompt_register_count():

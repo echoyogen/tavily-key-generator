@@ -106,6 +106,7 @@ def _build_provider(row: dict):
     """根据 DB 行构建 mail provider 实例。"""
     ptype = row["provider_type"]
     cfg = json.loads(row["config_json"] or "{}")
+    print(f"[mail/factory] provider config: {cfg}")
     pid = row["id"]
 
     if ptype == "onlinemail":
@@ -158,15 +159,78 @@ def _normalize_service(service):
     return service if service in _SUPPORTED_SERVICES else "tavily"
 
 
-def _username_prefix(service):
-    prefixes = {
-        "firecrawl": "fc",
-        "exa": "exa",
-        "you": "you",
-        "serper": "serper",
-        "valyu": "valyu",
-    }
-    return prefixes.get(_normalize_service(service), "tavily")
+def _generate_realistic_username():
+    first_names = (
+        "james", "john", "robert", "michael", "william", "david", "richard", "joseph",
+        "thomas", "charles", "christopher", "daniel", "matthew", "anthony", "mark",
+        "donald", "steven", "paul", "andrew", "joshua", "kenneth", "kevin", "brian",
+        "george", "edward", "ronald", "timothy", "jason", "jeffrey", "ryan", "jacob",
+        "gary", "nicholas", "eric", "jonathan", "stephen", "larry", "justin", "scott",
+        "brandon", "benjamin", "samuel", "gregory", "alexander", "frank", "patrick",
+        "raymond", "jack", "dennis", "jerry", "tyler", "aaron", "jose", "adam", "henry",
+        "nathan", "douglas", "zachary", "peter", "kyle", "walter", "ethan", "jeremy",
+        "harold", "keith", "christian", "roger", "noah", "gerald", "carl", "terry",
+        "sean", "arthur", "austin", "noah", "lawrence", "mary", "patricia", "jennifer",
+        "linda", "elizabeth", "barbara", "susan", "jessica", "sarah", "karen", "nancy",
+        "lisa", "betty", "margaret", "sandra", "ashley", "kimberly", "emily", "donna",
+        "michelle", "dorothy", "carol", "amanda", "melissa", "deborah", "stephanie",
+        "rebecca", "sharon", "laura", "cynthia", "kathleen", "amy", "shirley", "angela",
+        "helen", "anna", "brenda", "pamela", "nicole", "emma", "samantha", "katherine",
+        "christine", "debra", "rachel", "catherine", "janet", "ruth", "maria", "diane",
+        "julie", "joyce", "victoria", "olivia", "kelly", "christina", "lauren", "joan",
+        "evelyn", "judith", "megan", "cheryl", "andrea", "hannah", "martha", "jacqueline"
+    )
+    last_names = (
+        "smith", "johnson", "williams", "brown", "jones", "garcia", "miller", "davis",
+        "rodriguez", "martinez", "hernandez", "lopez", "gonzalez", "wilson", "anderson",
+        "thomas", "taylor", "moore", "jackson", "martin", "lee", "perez", "thompson",
+        "white", "harris", "sanchez", "clark", "ramirez", "lewis", "robinson", "walker",
+        "young", "allen", "king", "wright", "scott", "torres", "nguyen", "hill", "flores",
+        "green", "adams", "nelson", "baker", "hall", "rivera", "campbell", "mitchell",
+        "carter", "roberts", "gomez", "phillips", "evans", "turner", "diaz", "parker",
+        "cruz", "edwards", "collins", "reyes", "stewart", "morris", "morales", "murphy",
+        "cook", "rogers", "gutierrez", "ortiz", "morgan", "cooper", "peterson", "bailey",
+        "reed", "kelly", "howard", "ramos", "kim", "cox", "ward", "richardson", "watson",
+        "brooks", "chavez", "wood", "james", "bennett", "gray", "mendoza", "ruiz",
+        "hughes", "price", "alvarez", "castillo", "sanders", "patel", "myers", "long",
+        "ross", "foster", "jimenez"
+    )
+    
+    first = random.choice(first_names)
+    last = random.choice(last_names)
+    
+
+    formats = [
+        f"{first}{last}",
+        f"{first}.{last}",
+        f"{last}.{first}",
+        f"{first}_{last}",
+        f"{last}_{first}",
+        f"{first[0]}{last}",
+        f"{first}{last[0]}",
+    ]
+    
+    username = random.choice(formats)
+    
+
+    if random.random() < 0.7:
+        num_type = random.choice(['year', 'short', 'long'])
+        if num_type == 'year':
+            num = random.randint(1970, 2010)
+        elif num_type == 'short':
+            num = random.randint(1, 99)
+        else:
+            num = random.randint(100, 9999)
+        
+    
+        if random.random() < 0.5:
+            username = f"{username}{num}"
+        else:
+            username = f"{num}{username}"
+            
+    return username
+
+
 
 
 def create_email(service: str = "tavily") -> tuple[str, str]:
@@ -192,9 +256,9 @@ def create_email(service: str = "tavily") -> tuple[str, str]:
         return email, ""
 
     password = f"Tv{_rand_str(6)}{random.randint(100, 999)}!A"
-    prefix = _username_prefix(service)
+    username = _generate_realistic_username()
     provider = _build_provider(row)
-    email, pw = provider.create_mailbox(prefix)
+    email, pw = provider.create_mailbox(username)
     if pw:
         password = pw
     print(f"✅ 邮箱({ptype}): {email}")
