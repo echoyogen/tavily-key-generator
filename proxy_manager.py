@@ -1,6 +1,6 @@
 """
 Thread-safe round-robin proxy manager.
-Parses proxy URLs and provides credentials in Camoufox-compatible format.
+Parses proxy URLs and provides credentials in Playwright-compatible format.
 """
 import logging
 import threading
@@ -91,7 +91,7 @@ def get_proxy_dict() -> dict[str, str] | None:
     Get the next proxy dictionary from the global manager.
 
     Returns:
-        Proxy dictionary in Camoufox format, or None if proxies are disabled.
+        Proxy dictionary in Playwright format, or None if proxies are disabled.
     """
     if _manager is None:
         return None

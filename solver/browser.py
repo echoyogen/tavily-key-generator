@@ -2,7 +2,6 @@ import os
 import time
 import random
 import asyncio
-from camoufox.async_api import AsyncCamoufox
 from patchright.async_api import async_playwright
 from browser_configs import browser_config
 from solver.store import save_result
@@ -318,7 +317,7 @@ async def _inject_captcha_directly(page, websiteKey, action, cdata, index, debug
     return result
 
 
-async def solve_turnstile(task_id, sitekey, pageurl, action=None, cdata=None, browser_type="camoufox", headless=True, debug=False, proxy_support=False, useragent=None, sec_ch_ua=None):
+async def solve_turnstile(task_id, sitekey, pageurl, action=None, cdata=None, browser_type="chromium", headless=True, debug=False, proxy_support=False, useragent=None, sec_ch_ua=None):
     index = 1
     proxy = None
 
@@ -351,7 +350,6 @@ async def solve_turnstile(task_id, sitekey, pageurl, action=None, cdata=None, br
             proxy = None
 
     playwright = None
-    camoufox = None
     browser = None
 
     try:
@@ -362,9 +360,8 @@ async def solve_turnstile(task_id, sitekey, pageurl, action=None, cdata=None, br
                 headless=headless,
                 args=browser_args
             )
-        elif browser_type == "camoufox":
-            camoufox = AsyncCamoufox(headless=headless)
-            browser = await camoufox.start()
+        else:
+            raise ValueError(f"Unknown browser_type: {browser_type!r}. Supported: chromium, chrome, msedge")
 
         context_options = {}
         if useragent:
@@ -587,10 +584,5 @@ async def solve_turnstile(task_id, sitekey, pageurl, action=None, cdata=None, br
         if playwright:
             try:
                 await playwright.stop()
-            except Exception:
-                pass
-        if camoufox:
-            try:
-                await camoufox.stop()
             except Exception:
                 pass

@@ -49,7 +49,6 @@ def _ensure_deps():
     req_file = os.path.join(_HERE, "..", "requirements.txt")
     missing = []
     pkg_map = {
-        "camoufox": "camoufox",
         "patchright": "patchright",
         "psutil": "psutil",
         "quart": "quart",
@@ -73,32 +72,6 @@ def _ensure_deps():
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file, "-q"])
         print("✅ 依赖安装完成\n")
 
-
-def _camoufox_browser_ready():
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "camoufox", "path"],
-            capture_output=True,
-            check=True,
-            text=True,
-        )
-    except Exception:
-        return False
-
-    install_dir = result.stdout.strip()
-    if not install_dir:
-        return False
-
-    if os.path.isfile(install_dir):
-        return True
-
-    if not os.path.isdir(install_dir):
-        return False
-
-    try:
-        return bool(os.listdir(install_dir))
-    except OSError:
-        return False
 
 
 def _default_patchright_browser_root():
@@ -168,14 +141,6 @@ def _patchright_browser_ready():
     return False
 
 
-def _ensure_camoufox_browser():
-    if _camoufox_browser_ready():
-        return
-
-    print("正在下载 Camoufox 浏览器...")
-    subprocess.check_call([sys.executable, "-m", "camoufox", "fetch"])
-    print("✅ 浏览器下载完成\n")
-
 
 def _ensure_patchright_browser():
     if _patchright_browser_ready():
@@ -194,9 +159,4 @@ def _ensure_patchright_browser():
 
 
 def _ensure_service_browsers(service):
-    if service == "you":
-        _ensure_patchright_browser()
-    else:
-        _ensure_camoufox_browser()
-        if service == "tavily":
-            _ensure_patchright_browser()
+    _ensure_patchright_browser()

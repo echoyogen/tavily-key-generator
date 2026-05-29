@@ -10,7 +10,7 @@ ValyuService — HTTP 主路径 + 浏览器 Fallback
   5. GET  验证链接 (auth.valyu.ai/auth/v1/verify?token=...)，跟随重定向到 platform
   6. POST auth.valyu.ai/auth/v1/token?grant_type=password (密码登录，获取 access_token)
   7. GET  platform.valyu.ai/user/account/apikeys (提取或创建 API key)
-  → 全链路失败时: Camoufox 浏览器完成 11 步 onboarding
+   → 全链路失败时: patchright chromium 浏览器完成 11 步 onboarding
 """
 
 import html as _html_mod
@@ -92,7 +92,7 @@ class ValyuService(BaseService):
     # ------------------------------------------------------------------
 
     def register(self, email, password):
-        """HTTP 主路径注册，全链路失败时 fallback 到 Camoufox 浏览器。"""
+        """HTTP 主路径注册，全链路失败时 fallback 到 patchright 浏览器。"""
         sess = requests.Session()
 
         try:
@@ -430,7 +430,7 @@ class ValyuService(BaseService):
     # ------------------------------------------------------------------
 
     def _browser_fallback(self, email, password):
-        """Camoufox browser completes full 11-step onboarding (final fallback when HTTP chain fails)."""
+        """Patchright browser completes full 11-step onboarding (final fallback when HTTP chain fails)."""
         try:
             first_name = random.choice(_FIRST_NAMES)
             last_name = random.choice(_LAST_NAMES)

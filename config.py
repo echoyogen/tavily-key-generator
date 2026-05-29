@@ -106,7 +106,6 @@ SOLVER_THREADS = _get_int("SOLVER_THREADS", 1)
 # 代理配置
 PROXY_ENABLED = _get_bool("PROXY_ENABLED", False)
 PROXY_LIST = _get_list("PROXY_LIST")
-PROXY_GEOIP = _get_bool("PROXY_GEOIP", True)
 
 # Web 管理服务配置
 WEB_ADMIN_USER = _get_str("WEB_ADMIN_USER", "admin")
@@ -118,3 +117,22 @@ WEB_PORT = _get_int("WEB_PORT", 8086)
 DB_TYPE = _get_str("DB_TYPE", "sqlite").lower()          # "sqlite" | "postgresql"
 DB_PATH = _get_str("DB_PATH", "web/data.db")             # SQLite 文件路径
 DB_URL = _get_str("DB_URL", "")                          # PostgreSQL 连接 URL
+
+# 邮箱提供商配置
+EMAIL_PROVIDER = _get_str("EMAIL_PROVIDER", "cloudflare")  # "cloudflare" | "duckmail" | "onlinemail"
+SUPPORTED_EMAIL_PROVIDERS = ["cloudflare", "duckmail", "onlinemail"]
+
+# Cloudflare Email API 配置
+EMAIL_API_URL = _get_str("EMAIL_API_URL", "")
+EMAIL_API_TOKEN = _get_str("EMAIL_API_TOKEN", "")
+EMAIL_DOMAINS = _get_list("EMAIL_DOMAINS")
+
+# DuckMail 配置
+DUCKMAIL_API_KEY = _get_str("DUCKMAIL_API_KEY", "")
+DUCKMAIL_API_URL = _get_str("DUCKMAIL_API_URL", "https://www.duckmail.de/api/")
+DUCKMAIL_DOMAINS = _get_list("DUCKMAIL_DOMAINS", "duckmail.de")
+
+# OnlineMail 配置
+ONLINEMAIL_MODE = _get_str("ONLINEMAIL_MODE", "api")  # "api" | "browser"
+ONLINEMAIL_API_KEY = _get_str("ONLINEMAIL_API_KEY", "")
+ONLINEMAIL_ORDERS_FILE = _get_str("ONLINEMAIL_ORDERS_FILE", "onlinemail_orders.json")

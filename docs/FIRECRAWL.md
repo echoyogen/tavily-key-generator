@@ -104,7 +104,7 @@ A: 可能的原因：
 
 ## 技术细节
 
-- 使用 Camoufox 反检测浏览器
+- 使用 patchright chromium 浏览器
 - 支持 headless 模式
 - 自动处理页面跳转
 - 智能选择器匹配

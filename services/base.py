@@ -1,7 +1,8 @@
+import contextlib
 import threading
 from abc import ABC, abstractmethod
 
-from camoufox.sync_api import Camoufox
+from patchright.sync_api import sync_playwright
 
 import config
 
@@ -88,13 +89,24 @@ class BaseService(ABC):
             with open(self.output_file, "a", encoding="utf-8") as f:
                 f.write(f"{email},{password},{api_key}\n")
 
+    @contextlib.contextmanager
     def _open_browser(self):
         from proxy_manager import get_proxy_dict
         proxy = get_proxy_dict()
-        kwargs = {"headless": self._get_headless_setting()}
+        headless = self._get_headless_setting()
+        context_kwargs = {}
         if proxy:
-            kwargs["proxy"] = proxy
-            kwargs["geoip"] = config.PROXY_GEOIP
-            server = proxy.get("server", "")
-            print(f"Using proxy: {server}")
-        return Camoufox(**kwargs)
+            context_kwargs["proxy"] = {
+                "server": proxy.get("server", ""),
+                "username": proxy.get("username", ""),
+                "password": proxy.get("password", ""),
+            }
+            print(f"Using proxy: {proxy.get('server', '')}")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=headless)
+            ctx = browser.new_context(**context_kwargs)
+            try:
+                yield ctx
+            finally:
+                ctx.close()
+                browser.close()

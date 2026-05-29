@@ -27,7 +27,7 @@ class TestYouBrowserLaunch(unittest.TestCase):
         return mock_sync_playwright, mock_p, mock_browser, mock_ctx
 
     def test_you_open_browser_uses_patchright_chromium(self):
-        """YouService._open_browser() must use patchright chromium, not camoufox."""
+        """YouService._open_browser() must use patchright chromium (sync_playwright entry point)."""
         from services.you.service import YouService
 
         mock_sync_playwright, mock_p, mock_browser, mock_ctx = self._make_mock_playwright()
@@ -41,7 +41,7 @@ class TestYouBrowserLaunch(unittest.TestCase):
         # Verify sync_playwright was called (patchright entry point)
         mock_sync_playwright.assert_called_once()
 
-        # Verify chromium.launch was called (not camoufox)
+        # Verify chromium.launch was called
         mock_p.chromium.launch.assert_called_once()
 
         # Verify browser.new_context was called

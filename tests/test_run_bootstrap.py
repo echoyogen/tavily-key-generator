@@ -20,6 +20,7 @@ def _import_run_with_stubbed_check_call():
     with (
         patch("os.execv"),
         patch("subprocess.check_call", side_effect=fake_check_call),
+        patch("cli.bootstrap._get_venv_python", return_value="/fake/venv/bin/python"),
     ):
         module = importlib.import_module("run")
     return module, commands
@@ -35,70 +36,25 @@ class RunBootstrapTests(unittest.TestCase):
         browser_commands = [
             command
             for command in commands
-            if command[:3] == [sys.executable, "-m", "camoufox"]
-            or command[:3] == [sys.executable, "-m", "patchright"]
+            if command[:3] == [sys.executable, "-m", "patchright"]
         ]
 
         self.assertEqual(browser_commands, [])
 
-    def test_ensure_service_browsers_only_uses_camoufox_for_exa(self) -> None:
-        with (
-            patch.object(bootstrap, "_ensure_camoufox_browser") as ensure_camoufox,
-            patch.object(bootstrap, "_ensure_patchright_browser") as ensure_patchright,
-        ):
+    def test_ensure_service_browsers_uses_patchright_for_exa(self) -> None:
+        with patch.object(bootstrap, "_ensure_patchright_browser") as ensure_patchright:
             bootstrap._ensure_service_browsers("exa")
-
-        ensure_camoufox.assert_called_once_with()
-        ensure_patchright.assert_not_called()
+        ensure_patchright.assert_called_once_with()
 
     def test_ensure_service_browsers_uses_patchright_for_tavily(self) -> None:
-        with (
-            patch.object(bootstrap, "_ensure_camoufox_browser") as ensure_camoufox,
-            patch.object(bootstrap, "_ensure_patchright_browser") as ensure_patchright,
-        ):
+        with patch.object(bootstrap, "_ensure_patchright_browser") as ensure_patchright:
             bootstrap._ensure_service_browsers("tavily")
-
-        ensure_camoufox.assert_called_once_with()
         ensure_patchright.assert_called_once_with()
 
     def test_ensure_service_browsers_uses_patchright_for_you(self) -> None:
-        with (
-            patch.object(bootstrap, "_ensure_camoufox_browser") as ensure_camoufox,
-            patch.object(bootstrap, "_ensure_patchright_browser") as ensure_patchright,
-        ):
+        with patch.object(bootstrap, "_ensure_patchright_browser") as ensure_patchright:
             bootstrap._ensure_service_browsers("you")
-
-        ensure_camoufox.assert_not_called()
         ensure_patchright.assert_called_once_with()
-
-    def test_camoufox_browser_ready_uses_cli_path(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            Path(temp_dir, "camoufox").write_text("ok", encoding="utf-8")
-            completed = subprocess.CompletedProcess(
-                args=[sys.executable, "-m", "camoufox", "path"],
-                returncode=0,
-                stdout=f"{temp_dir}\n",
-                stderr="",
-            )
-
-            with patch.object(bootstrap.subprocess, "run", return_value=completed) as mock_run:
-                self.assertTrue(bootstrap._camoufox_browser_ready())
-
-        mock_run.assert_called_once()
-
-    def test_camoufox_browser_ready_accepts_file_path(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            binary_path = Path(temp_dir, "camoufox-bin")
-            binary_path.write_text("ok", encoding="utf-8")
-            completed = subprocess.CompletedProcess(
-                args=[sys.executable, "-m", "camoufox", "path"],
-                returncode=0,
-                stdout=f"{binary_path}\n",
-                stderr="",
-            )
-
-            with patch.object(bootstrap.subprocess, "run", return_value=completed):
-                self.assertTrue(bootstrap._camoufox_browser_ready())
 
     def test_patchright_browser_ready_uses_expected_install_location(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
