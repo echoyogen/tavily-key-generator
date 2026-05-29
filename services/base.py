@@ -12,27 +12,27 @@ class BaseService(ABC):
 
     @property
     @abstractmethod
-    def name(self):
+    def name(self) -> str:
         pass
 
     @property
     @abstractmethod
-    def signup_url(self):
+    def signup_url(self) -> str:
         pass
 
     @property
     @abstractmethod
-    def api_key_prefix(self):
+    def api_key_prefix(self) -> str:
         pass
 
     @property
     @abstractmethod
-    def output_file(self):
+    def output_file(self) -> str:
         pass
 
     @property
     @abstractmethod
-    def headless_config_key(self):
+    def headless_config_key(self) -> str:
         pass
 
     def register(self, email, password):
