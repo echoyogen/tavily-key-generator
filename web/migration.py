@@ -90,57 +90,7 @@ async def migrate_accounts(session: AsyncSession) -> int:
     return total_inserted
 
 
-async def migrate_mail_orders(session: AsyncSession) -> int:
-    """将 onlinemail_orders.txt 中的订单迁移到 DB，返回新增条数。"""
-    from web.models import MailOrder
-
-    filepath = _ROOT / _ONLINEMAIL_FILE
-    if not filepath.exists():
-        return 0
-
-    lines = filepath.read_text(encoding="utf-8").splitlines()
-    total_inserted = 0
-
-    for line in lines:
-        line = line.strip()
-        if not line or "----" not in line:
-            continue
-
-        parts = line.split("----", 1)
-        if len(parts) != 2:
-            continue
-
-        email = parts[0].strip()
-        order_id = parts[1].strip()
-
-        if not email or not order_id:
-            continue
-
-        result = await session.execute(
-            select(MailOrder).where(
-                MailOrder.email == email,
-                MailOrder.order_id == order_id,
-            )
-        )
-        if result.scalar_one_or_none() is not None:
-            continue
-
-        order = MailOrder(email=email, order_id=order_id, used=False)
-        session.add(order)
-        try:
-            await session.flush()
-            total_inserted += 1
-        except IntegrityError:
-            await session.rollback()
-
-    await session.commit()
-    if total_inserted:
-        logger.info(f"[migration] 邮箱订单迁移完成，新增 {total_inserted} 条")
-    return total_inserted
-
-
 async def run_all_migrations(session: AsyncSession):
     """执行全部迁移，启动时调用。"""
     accounts = await migrate_accounts(session)
-    orders = await migrate_mail_orders(session)
-    logger.info(f"[migration] 完成：账号 +{accounts}，邮箱订单 +{orders}")
+    logger.info(f"[migration] 完成：账号 +{accounts}")

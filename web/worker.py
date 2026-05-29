@@ -130,6 +130,66 @@ async def _update_task(task_id: int, **kwargs):
             await session.commit()
 
 
+async def _create_email_usage(
+    task_id: int, service: str
+) -> int:
+    """预创建 EmailUsage 记录（pending），返回 usage_id。"""
+    from web.database import get_session_factory
+    from web.models import EmailUsage, MailProvider
+    from sqlalchemy import select
+
+    factory = get_session_factory()
+    async with factory() as session:
+        # 找当前激活的 provider id
+        row = (await session.execute(
+            select(MailProvider).where(MailProvider.enabled == True).limit(1)
+        )).scalar_one_or_none()
+        provider_id = row.id if row else 0
+
+        usage = EmailUsage(
+            provider_id=provider_id,
+            task_id=task_id,
+            email="",          # 尚未分配，注册后回填
+            target_service=service,
+            status="pending",
+        )
+        session.add(usage)
+        await session.commit()
+        await session.refresh(usage)
+        return usage.id
+
+
+async def _update_email_usage(
+    usage_id: int,
+    email: str = "",
+    order_id: Optional[str] = None,
+    status: str = "pending",
+    api_key: Optional[str] = None,
+    fail_reason: Optional[str] = None,
+):
+    from web.database import get_session_factory
+    from web.models import EmailUsage
+    from datetime import datetime, timezone
+
+    factory = get_session_factory()
+    async with factory() as session:
+        usage = await session.get(EmailUsage, usage_id)
+        if not usage:
+            return
+        if email:
+            usage.email = email
+        if order_id is not None:
+            usage.order_id = order_id
+        usage.status = status
+        if api_key is not None:
+            usage.api_key = api_key
+        if fail_reason is not None:
+            usage.fail_reason = fail_reason[:500]
+        if status in ("success", "failed", "cancelled"):
+            usage.finished_at = datetime.now(timezone.utc)
+        await session.commit()
+
+
 async def _save_account(service: str, email: str, password: Optional[str], api_key: str):
     from web.database import get_session_factory
     from web.models import Account
@@ -169,6 +229,12 @@ def _register_one_sync(
     print(f"[{index}/{total}] 开始注册 {service}")
     print(f"{'='*50}")
 
+    # 预创建 EmailUsage 追踪记录（status=pending，后续更新）
+    usage_id: int = asyncio.run_coroutine_threadsafe(
+        _create_email_usage(task_id, service), loop
+    ).result(timeout=10)
+
+    email = ""
     try:
         from mail.factory import create_email
         from services.registry import get_service
@@ -176,15 +242,40 @@ def _register_one_sync(
         import requests as std_requests
 
         email, password = create_email(service=service)
+
+        # 回填邮箱地址（onlinemail 还需记录 order_id）
+        order_id: Optional[str] = None
+        try:
+            from mail import factory as _mf
+            row = asyncio.run_coroutine_threadsafe(
+                _mf._load_active_provider_row(), loop
+            ).result(timeout=5)
+            if row and row["provider_type"] == "onlinemail":
+                inst = _mf._onlinemail_instances.get(row["id"])
+                if inst:
+                    cache = inst._mailbox_cache.get(email, {})
+                    order_id = cache.get("order_id")
+        except Exception:
+            pass
+
+        asyncio.run_coroutine_threadsafe(
+            _update_email_usage(usage_id, email=email, order_id=order_id, status="pending"),
+            loop,
+        )
+
         svc = get_service(service)
         api_key = svc.register(email, password)
 
         if api_key and api_key != "SUCCESS_NO_KEY":
             print(f"✅ 注册成功: {email} -> {api_key[:20]}...")
-            # 写入 DB
+            # 写入账号 DB
             asyncio.run_coroutine_threadsafe(
                 _save_account(service, email, password, api_key), loop
             ).result(timeout=10)
+            # 更新邮箱使用记录
+            asyncio.run_coroutine_threadsafe(
+                _update_email_usage(usage_id, status="success", api_key=api_key), loop
+            )
 
             if upload and SERVER_URL:
                 try:
@@ -208,13 +299,24 @@ def _register_one_sync(
 
         if api_key == "SUCCESS_NO_KEY":
             print(f"✅ 注册成功（无 Key）: {email}")
+            asyncio.run_coroutine_threadsafe(
+                _update_email_usage(usage_id, status="success"), loop
+            )
             return "success_no_key"
 
         print("❌ 注册失败：未获取到 API Key")
+        asyncio.run_coroutine_threadsafe(
+            _update_email_usage(usage_id, status="failed",
+                                fail_reason="未获取到 API Key"), loop
+        )
         return "failed"
 
     except Exception as e:
         print(f"❌ 注册异常: {e}")
+        asyncio.run_coroutine_threadsafe(
+            _update_email_usage(usage_id, email=email, status="failed",
+                                fail_reason=str(e)[:500]), loop
+        )
         return "failed"
 
 

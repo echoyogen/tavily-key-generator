@@ -94,7 +94,7 @@ class Base(DeclarativeBase):
 
 async def init_db():
     """创建所有表（幂等，使用 CREATE TABLE IF NOT EXISTS 语义）。"""
-    from web.models import Account, Task, TaskLog, MailOrder, Schedule  # noqa: F401
+    from web.models import Account, Task, TaskLog, MailProvider, EmailUsage, Schedule  # noqa: F401
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -6,12 +6,6 @@ import os
 from pathlib import Path
 
 PLACEHOLDER_ENV_VALUES = {
-    "EMAIL_API_URL": {"https://your-mail-api.example.com"},
-    "EMAIL_API_TOKEN": {"replace-with-your-token"},
-    "EMAIL_DOMAIN": {"example.com"},
-    "EMAIL_DOMAINS": {"example.com", "example.org"},
-    "DUCKMAIL_DOMAIN": {"example.com"},
-    "DUCKMAIL_DOMAINS": {"example.com", "example.org"},
     "SERVER_URL": {"https://your-server.example.com"},
     "SERVER_ADMIN_PASSWORD": {"replace-with-your-admin-password"},
 }
@@ -82,23 +76,6 @@ def is_placeholder_env_value(name, value):
 
 
 _load_dotenv()
-
-# 邮箱配置
-EMAIL_PROVIDER = _get_str("EMAIL_PROVIDER", "cloudflare").lower()
-SUPPORTED_EMAIL_PROVIDERS = ("cloudflare", "duckmail", "onlinemail")
-EMAIL_API_URL = _get_str("EMAIL_API_URL")
-EMAIL_API_TOKEN = _get_str("EMAIL_API_TOKEN")
-EMAIL_DOMAIN = _get_str("EMAIL_DOMAIN")
-EMAIL_DOMAINS = _get_list("EMAIL_DOMAINS", EMAIL_DOMAIN)
-DUCKMAIL_API_URL = _get_str("DUCKMAIL_API_URL", "https://api.duckmail.sbs")
-DUCKMAIL_API_KEY = _get_str("DUCKMAIL_API_KEY")
-DUCKMAIL_DOMAIN = _get_str("DUCKMAIL_DOMAIN")
-DUCKMAIL_DOMAINS = _get_list("DUCKMAIL_DOMAINS", DUCKMAIL_DOMAIN)
-
-ONLINEMAIL_API_KEY = _get_str("ONLINEMAIL_API_KEY")
-ONLINEMAIL_MODE = _get_str("ONLINEMAIL_MODE", "file").lower()  # "file" | "api"
-ONLINEMAIL_ORDERS_FILE = _get_str("ONLINEMAIL_ORDERS_FILE", "onlinemail_orders.txt")
-ONLINEMAIL_BUY_MODE = _get_str("ONLINEMAIL_BUY_MODE", "0")  # "0"=후불 | "1"=선불
 
 # 上传目标
 SERVER_URL = _get_str("SERVER_URL")

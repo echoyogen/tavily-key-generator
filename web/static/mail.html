@@ -1,220 +1,314 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>邮箱订单 - API Key 管理平台</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/static/js/common.js"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>邮件服务商 - API Key 管理</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<script src="/static/js/common.js"></script>
+<style>
+  [x-cloak]{display:none!important}
+  .modal-bg{background:rgba(0,0,0,.5)}
+</style>
 </head>
-<body class="min-h-screen bg-gray-950 text-gray-200">
+<body class="bg-gray-50 min-h-screen" x-data="mailApp()" x-init="init()" x-cloak>
 
-  <nav class="bg-gray-900 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
+<!-- 导航 -->
+<nav class="bg-white shadow-sm border-b border-gray-200">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
     <div class="flex items-center gap-6">
-      <span class="text-white font-bold text-lg">🔑 Key 管理平台</span>
-      <a href="/" class="text-gray-400 hover:text-gray-200 text-sm">Dashboard</a>
-      <a href="/accounts" class="text-gray-400 hover:text-gray-200 text-sm">账号管理</a>
-      <a href="/tasks" class="text-gray-400 hover:text-gray-200 text-sm">注册任务</a>
-      <a href="/mail" class="text-blue-400 text-sm font-medium">邮箱订单</a>
-      <a href="/schedule" class="text-gray-400 hover:text-gray-200 text-sm">定时任务</a>
+      <span class="text-lg font-bold text-gray-800">API Key 管理</span>
+      <a href="/" class="text-sm text-gray-500 hover:text-gray-700">概览</a>
+      <a href="/accounts" class="text-sm text-gray-500 hover:text-gray-700">账号</a>
+      <a href="/tasks" class="text-sm text-gray-500 hover:text-gray-700">任务</a>
+      <a href="/mail" class="text-sm font-medium text-blue-600 border-b-2 border-blue-600 pb-1">邮件服务商</a>
+      <a href="/mail-usages" class="text-sm text-gray-500 hover:text-gray-700">邮箱使用记录</a>
+      <a href="/schedule" class="text-sm text-gray-500 hover:text-gray-700">定时任务</a>
     </div>
-    <button onclick="clearToken(); window.location.href='/login'" class="text-gray-500 hover:text-red-400 text-sm transition">退出登录</button>
-  </nav>
+    <button @click="logout()" class="text-sm text-gray-500 hover:text-red-500">退出</button>
+  </div>
+</nav>
 
-  <div x-data="mailApp()" class="max-w-6xl mx-auto px-6 py-6">
+<div class="max-w-5xl mx-auto px-4 py-8 space-y-6">
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-      <!-- 左侧：批量添加 -->
-      <div class="lg:col-span-1">
-        <div class="bg-gray-900 border border-gray-700 rounded-xl p-5">
-          <h2 class="text-base font-semibold text-white mb-1">批量添加订单</h2>
-          <p class="text-xs text-gray-400 mb-3">每行格式：<code class="bg-gray-800 px-1 rounded">email----orderId</code></p>
-          <textarea
-            x-model="bulkInput"
-            rows="10"
-            placeholder="example@domain.com----order123&#10;another@domain.com----order456"
-            class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 font-mono resize-none focus:outline-none focus:border-blue-500"
-          ></textarea>
-          <button @click="bulkAdd()" :disabled="!bulkInput.trim() || adding"
-            class="mt-3 w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 text-white text-sm font-semibold py-2 rounded-lg transition">
-            <span x-text="adding ? '添加中...' : '批量添加'"></span>
-          </button>
-          <div x-show="addResult" class="mt-3 p-3 bg-gray-800 rounded-lg text-xs text-gray-300" x-text="addResult"></div>
-
-          <!-- 统计 -->
-          <div class="mt-4 pt-4 border-t border-gray-700 grid grid-cols-2 gap-2 text-center">
-            <div class="bg-gray-800 rounded-lg p-3">
-              <div class="text-2xl font-bold text-white" x-text="unusedCount"></div>
-              <div class="text-xs text-gray-400">未使用</div>
-            </div>
-            <div class="bg-gray-800 rounded-lg p-3">
-              <div class="text-2xl font-bold text-gray-400" x-text="usedCount"></div>
-              <div class="text-xs text-gray-400">已使用</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 右侧：订单列表 -->
-      <div class="lg:col-span-2">
-        <div class="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
-          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-            <h2 class="text-base font-semibold text-white">邮箱订单列表</h2>
-            <div class="flex items-center gap-3">
-              <select x-model="filterUsed" @change="loadPage(1)"
-                class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white">
-                <option value="">全部</option>
-                <option value="false">未使用</option>
-                <option value="true">已使用</option>
-              </select>
-              <button @click="deleteSelected()" :disabled="selected.length === 0"
-                class="text-red-400 hover:text-red-300 text-xs disabled:opacity-40">删除选中</button>
-            </div>
-          </div>
-
-          <table class="w-full text-sm">
-            <thead class="bg-gray-800 text-gray-400 text-xs uppercase">
-              <tr>
-                <th class="px-4 py-3 text-left w-8">
-                  <input type="checkbox" @change="toggleAll($event)" class="rounded" />
-                </th>
-                <th class="px-4 py-3 text-left">邮箱</th>
-                <th class="px-4 py-3 text-left">Order ID</th>
-                <th class="px-4 py-3 text-left">状态</th>
-                <th class="px-4 py-3 text-left">创建时间</th>
-                <th class="px-4 py-3 text-left w-16">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template x-if="orders.length === 0">
-                <tr><td colspan="6" class="text-center py-10 text-gray-500">暂无数据</td></tr>
-              </template>
-              <template x-for="o in orders" :key="o.id">
-                <tr class="border-t border-gray-800 hover:bg-gray-800/50">
-                  <td class="px-4 py-2">
-                    <input type="checkbox" :value="o.id" x-model="selected" class="rounded" />
-                  </td>
-                  <td class="px-4 py-2 text-xs text-gray-300" x-text="o.email"></td>
-                  <td class="px-4 py-2 text-xs font-mono text-gray-400" x-text="o.order_id"></td>
-                  <td class="px-4 py-2">
-                    <span :class="o.used ? 'text-gray-500' : 'text-green-400'" class="text-xs"
-                          x-text="o.used ? '已使用' : '可用'"></span>
-                  </td>
-                  <td class="px-4 py-2 text-xs text-gray-500" x-text="fmtDateShort(o.created_at)"></td>
-                  <td class="px-4 py-2">
-                    <button @click="deleteOne(o.id)" class="text-red-400 hover:text-red-300 text-xs">删除</button>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-
-          <!-- 分页 -->
-          <div class="px-4 py-3 border-t border-gray-700 flex items-center justify-between text-xs text-gray-400">
-            <span>共 <span x-text="total"></span> 条</span>
-            <div class="flex gap-2">
-              <button @click="loadPage(page - 1)" :disabled="page <= 1"
-                class="px-2 py-1 bg-gray-800 rounded disabled:opacity-40">上一页</button>
-              <span class="px-2 py-1"><span x-text="page"></span>/<span x-text="totalPages"></span></span>
-              <button @click="loadPage(page + 1)" :disabled="page >= totalPages"
-                class="px-2 py-1 bg-gray-800 rounded disabled:opacity-40">下一页</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+  <!-- 标题栏 -->
+  <div class="flex items-center justify-between">
+    <h1 class="text-xl font-semibold text-gray-800">邮件服务商配置</h1>
+    <button @click="openCreate()"
+      class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">
+      + 添加服务商
+    </button>
   </div>
 
-  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
-  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
-  <script>
-    function mailApp() {
-      return {
-        orders: [],
-        selected: [],
-        total: 0, page: 1, pageSize: 20,
-        filterUsed: '',
-        bulkInput: '',
-        addResult: '',
-        adding: false,
-        unusedCount: 0,
-        usedCount: 0,
+  <!-- 服务商列表 -->
+  <div class="space-y-4">
+    <template x-if="providers.length === 0">
+      <div class="bg-white rounded-xl border border-dashed border-gray-300 p-12 text-center text-gray-400">
+        暂无服务商，点击右上角"添加服务商"进行配置
+      </div>
+    </template>
 
-        fmtDateShort,
+    <template x-for="p in providers" :key="p.id">
+      <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        <div class="flex items-start justify-between gap-4">
+          <!-- 基本信息 -->
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-3 flex-wrap">
+              <span class="font-medium text-gray-900" x-text="p.name"></span>
+              <span class="text-xs px-2 py-0.5 rounded-full font-mono"
+                :class="{'bg-blue-100 text-blue-700': p.provider_type==='cloudflare',
+                         'bg-yellow-100 text-yellow-700': p.provider_type==='duckmail',
+                         'bg-purple-100 text-purple-700': p.provider_type==='onlinemail'}"
+                x-text="p.provider_type"></span>
+              <span x-show="p.enabled"
+                class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">激活中</span>
+              <span x-show="!p.enabled"
+                class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">已禁用</span>
+            </div>
 
-        get totalPages() { return Math.max(1, Math.ceil(this.total / this.pageSize)); },
+            <!-- config_json 预览 -->
+            <div class="mt-2 text-xs text-gray-500 font-mono bg-gray-50 rounded px-3 py-2 break-all"
+              x-text="configPreview(p.config_json)"></div>
 
-        async loadPage(p) {
-          if (p < 1 || p > this.totalPages) return;
-          this.selected = [];
-          try {
-            const params = new URLSearchParams({ page: p, page_size: this.pageSize });
-            if (this.filterUsed !== '') params.set('used', this.filterUsed);
-            const data = await apiJson('/api/mail-orders?' + params);
-            this.orders = data.items;
-            this.total = data.total;
-            this.page = p;
-          } catch (e) { showToast('加载失败: ' + e.message, 'error'); }
-        },
+            <!-- onlinemail 订单池状态 -->
+            <div x-show="p.provider_type === 'onlinemail'" class="mt-2 flex items-center gap-3 text-sm">
+              <span class="text-gray-500">订单池剩余：</span>
+              <span class="font-medium"
+                :class="p.orders_remaining > 0 ? 'text-green-600' : 'text-red-500'"
+                x-text="p.orders_remaining + ' 条'"></span>
+              <button @click="openAddOrders(p)"
+                class="text-xs text-blue-600 hover:underline">+ 追加订单</button>
+              <button @click="clearOrders(p)"
+                class="text-xs text-red-500 hover:underline">清空</button>
+            </div>
+          </div>
 
-        async loadCounts() {
-          try {
-            const [u, used] = await Promise.all([
-              apiJson('/api/mail-orders?used=false&page=1&page_size=1'),
-              apiJson('/api/mail-orders?used=true&page=1&page_size=1'),
-            ]);
-            this.unusedCount = u.total;
-            this.usedCount = used.total;
-          } catch {}
-        },
+          <!-- 操作按钮 -->
+          <div class="flex items-center gap-2 shrink-0">
+            <button @click="toggleEnable(p)"
+              :class="p.enabled ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                : 'bg-green-50 text-green-700 hover:bg-green-100'"
+              class="text-xs px-3 py-1.5 rounded-lg transition"
+              x-text="p.enabled ? '禁用' : '启用'"></button>
+            <button @click="openEdit(p)"
+              class="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">编辑</button>
+            <button @click="deleteProvider(p)"
+              class="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">删除</button>
+          </div>
+        </div>
 
-        async bulkAdd() {
-          this.adding = true;
-          this.addResult = '';
-          try {
-            const r = await apiJson('/api/mail-orders', {
-              method: 'POST',
-              body: JSON.stringify({ lines: this.bulkInput }),
-            });
-            this.addResult = `新增 ${r.inserted} 条，跳过 ${r.skipped} 条（重复）`;
-            this.bulkInput = '';
-            await this.loadPage(1);
-            await this.loadCounts();
-          } catch (e) { showToast('添加失败: ' + e.message, 'error'); }
-          finally { this.adding = false; }
-        },
+        <!-- 统计行 -->
+        <div class="mt-3 pt-3 border-t border-gray-100 flex gap-6 text-xs text-gray-500">
+          <span>创建于 <span x-text="fmtDate(p.created_at)"></span></span>
+          <a :href="'/mail-usages?provider=' + p.id" class="text-blue-500 hover:underline">查看使用记录</a>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
 
-        toggleAll(e) { this.selected = e.target.checked ? this.orders.map(o => o.id) : []; },
+<!-- 创建/编辑 Modal -->
+<div x-show="showForm" class="fixed inset-0 modal-bg flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-lg" @click.outside="showForm=false">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+      <h2 class="font-semibold text-gray-800" x-text="editTarget ? '编辑服务商' : '添加服务商'"></h2>
+      <button @click="showForm=false" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+    </div>
+    <div class="px-6 py-5 space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">名称 <span class="text-red-500">*</span></label>
+        <input x-model="form.name" type="text" placeholder="如：cloudflare-main"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">类型 <span class="text-red-500">*</span></label>
+        <select x-model="form.provider_type"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          :disabled="!!editTarget">
+          <option value="cloudflare">cloudflare</option>
+          <option value="duckmail">duckmail</option>
+          <option value="onlinemail">onlinemail</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">配置参数 (JSON)</label>
+        <div class="text-xs text-gray-400 mb-1" x-html="configHint(form.provider_type)"></div>
+        <textarea x-model="form.config_json" rows="6"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder='{"api_url":"...","api_token":"...","domain":"..."}'></textarea>
+      </div>
+      <div class="flex items-center gap-2">
+        <input type="checkbox" id="chk-enabled" x-model="form.enabled" class="rounded" />
+        <label for="chk-enabled" class="text-sm text-gray-700">启用（同时禁用其他服务商）</label>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+      <button @click="showForm=false"
+        class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">取消</button>
+      <button @click="saveProvider()"
+        class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">保存</button>
+    </div>
+  </div>
+</div>
 
-        async deleteOne(id) {
-          if (!confirm('删除该订单？')) return;
-          try {
-            await apiFetch('/api/mail-orders/' + id, { method: 'DELETE' });
-            showToast('已删除', 'success');
-            await this.loadPage(this.page);
-            await this.loadCounts();
-          } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
-        },
+<!-- 追加订单 Modal -->
+<div x-show="showOrders" class="fixed inset-0 modal-bg flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-lg" @click.outside="showOrders=false">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+      <h2 class="font-semibold text-gray-800">追加 onlinemail 订单</h2>
+      <button @click="showOrders=false" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+    </div>
+    <div class="px-6 py-5 space-y-3">
+      <p class="text-sm text-gray-500">每行格式：<code class="bg-gray-100 px-1 rounded">email----orderId</code></p>
+      <textarea x-model="ordersText" rows="10"
+        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+        placeholder="user@example.com----ORD123456"></textarea>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+      <button @click="showOrders=false" class="px-4 py-2 text-sm text-gray-600">取消</button>
+      <button @click="submitOrders()"
+        class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">追加</button>
+    </div>
+  </div>
+</div>
 
-        async deleteSelected() {
-          if (!confirm(`删除选中的 ${this.selected.length} 条？`)) return;
-          try {
-            const params = this.selected.map(id => `ids=${id}`).join('&');
-            await apiFetch('/api/mail-orders?' + params, { method: 'DELETE' });
-            showToast(`已删除 ${this.selected.length} 条`, 'success');
-            await this.loadPage(this.page);
-            await this.loadCounts();
-          } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
-        },
+<!-- Toast -->
+<div x-show="toast.show" x-transition
+  class="fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm text-white shadow-lg z-50"
+  :class="toast.ok ? 'bg-green-600' : 'bg-red-500'"
+  x-text="toast.msg"></div>
 
-        init() {
-          requireLogin();
-          this.loadPage(1);
-          this.loadCounts();
-        }
+<script>
+function mailApp() {
+  return {
+    providers: [],
+    showForm: false,
+    editTarget: null,
+    form: { name: '', provider_type: 'cloudflare', config_json: '{}', enabled: true },
+
+    showOrders: false,
+    ordersTarget: null,
+    ordersText: '',
+
+    toast: { show: false, ok: true, msg: '' },
+
+    async init() {
+      if (!getToken()) { location.href = '/login'; return; }
+      await this.load();
+    },
+
+    async load() {
+      const data = await apiJson('/api/mail-providers');
+      this.providers = data;
+    },
+
+    openCreate() {
+      this.editTarget = null;
+      this.form = { name: '', provider_type: 'cloudflare', config_json: '{}', enabled: true };
+      this.showForm = true;
+    },
+
+    openEdit(p) {
+      this.editTarget = p;
+      this.form = { name: p.name, provider_type: p.provider_type,
+                    config_json: p.config_json, enabled: p.enabled };
+      this.showForm = true;
+    },
+
+    async saveProvider() {
+      try {
+        JSON.parse(this.form.config_json);
+      } catch {
+        this.showToast('config_json 不是合法的 JSON', false); return;
+      }
+      if (!this.form.name.trim()) { this.showToast('请填写名称', false); return; }
+
+      let res;
+      if (this.editTarget) {
+        res = await apiJson(`/api/mail-providers/${this.editTarget.id}`, {
+          method: 'PATCH', body: JSON.stringify({
+            name: this.form.name, config_json: this.form.config_json, enabled: this.form.enabled
+          })
+        });
+      } else {
+        res = await apiJson('/api/mail-providers', {
+          method: 'POST', body: JSON.stringify(this.form)
+        });
+      }
+      this.showForm = false;
+      await this.load();
+      this.showToast(this.editTarget ? '已更新' : '已创建', true);
+    },
+
+    async toggleEnable(p) {
+      await apiJson(`/api/mail-providers/${p.id}`, {
+        method: 'PATCH', body: JSON.stringify({ enabled: !p.enabled })
+      });
+      await this.load();
+      this.showToast(!p.enabled ? '已启用（其他服务商已禁用）' : '已禁用', true);
+    },
+
+    async deleteProvider(p) {
+      if (!confirm(`确认删除服务商「${p.name}」？相关邮箱使用记录将一并删除。`)) return;
+      await apiFetch(`/api/mail-providers/${p.id}`, { method: 'DELETE' });
+      await this.load();
+      this.showToast('已删除', true);
+    },
+
+    openAddOrders(p) {
+      this.ordersTarget = p;
+      this.ordersText = '';
+      this.showOrders = true;
+    },
+
+    async submitOrders() {
+      if (!this.ordersText.trim()) { this.showToast('请输入订单', false); return; }
+      const res = await apiJson(`/api/mail-providers/${this.ordersTarget.id}/orders`, {
+        method: 'POST', body: JSON.stringify({ lines: this.ordersText })
+      });
+      this.showOrders = false;
+      await this.load();
+      this.showToast(`已追加，当前剩余 ${res.orders_remaining} 条`, true);
+    },
+
+    async clearOrders(p) {
+      if (!confirm(`确认清空「${p.name}」的订单池？`)) return;
+      await apiFetch(`/api/mail-providers/${p.id}/orders`, { method: 'DELETE' });
+      await this.load();
+      this.showToast('订单池已清空', true);
+    },
+
+    configPreview(json) {
+      try {
+        const o = JSON.parse(json || '{}');
+        const keys = Object.keys(o);
+        if (!keys.length) return '(无配置)';
+        return keys.map(k => {
+          const v = String(o[k]);
+          const display = v.length > 20 ? v.slice(0, 20) + '…' : v;
+          return `${k}: ${display}`;
+        }).join('  |  ');
+      } catch { return json; }
+    },
+
+    configHint(type) {
+      const hints = {
+        cloudflare: `<b>Cloudflare</b>: <code>{"api_url":"https://...","api_token":"xxx","domain":"example.com"}</code>`,
+        duckmail: `<b>DuckMail</b>: <code>{"api_url":"https://api.duckmail.sbs","api_key":"","domains":["baldur.edu.kg"]}</code>`,
+        onlinemail: `<b>OnlineDispoMail</b>: <code>{"api_key":"xxx","mode":"api"}</code><br>订单池在保存后通过"追加订单"按钮管理`,
       };
-    }
-  </script>
+      return hints[type] || '';
+    },
+
+    showToast(msg, ok = true) {
+      this.toast = { show: true, ok, msg };
+      setTimeout(() => this.toast.show = false, 3000);
+    },
+
+    logout() { clearToken(); location.href = '/login'; },
+  };
+}
+</script>
 </body>
 </html>

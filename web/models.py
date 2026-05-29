@@ -83,17 +83,60 @@ class TaskLog(Base):
     task: Mapped[Task] = relationship("Task", back_populates="logs")
 
 
-class MailOrder(Base):
-    """OnlineDispoMail 临时邮箱订单。"""
-    __tablename__ = "mail_orders"
+class MailProvider(Base):
+    """邮件服务商配置（在平台管理界面维护，不再依赖 .env）。"""
+    __tablename__ = "mail_providers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(256), nullable=False)
-    order_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # cloudflare | duckmail | onlinemail
+    provider_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    # JSON 字符串存储提供商特定参数
+    config_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 仅 onlinemail 使用：预购邮箱的剩余订单（每行 email----orderId）
+    orders_pool: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    usages: Mapped[list[EmailUsage]] = relationship(
+        "EmailUsage", back_populates="provider", cascade="all, delete-orphan"
+    )
+
+
+class EmailUsage(Base):
+    """每一个邮箱的使用追踪记录。"""
+    __tablename__ = "email_usages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("mail_providers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 使用该邮箱的 task_id（可为空，表示非 Web 触发）
+    task_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    email: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    # onlinemail 订单号，其他 provider 为空
+    order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # 用于注册哪个平台
+    target_service: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # pending / success / failed / cancelled
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    # 注册成功后获得的 api_key（成功时填充）
+    api_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # 失败原因摘要
+    fail_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    provider: Mapped[MailProvider] = relationship("MailProvider", back_populates="usages")
 
 
 class Schedule(Base):

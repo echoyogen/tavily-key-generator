@@ -61,7 +61,7 @@ def create_app() -> FastAPI:
     from web.routers.stats import router as stats_router
     from web.routers.accounts import router as accounts_router
     from web.routers.tasks import router as tasks_router
-    from web.routers.mail import router as mail_router
+    from web.routers.mail_provider import router as mail_provider_router
     from web.routers.verify import router as verify_router
     from web.routers.schedule import router as schedule_router
 
@@ -69,7 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(stats_router)
     app.include_router(accounts_router)
     app.include_router(tasks_router)
-    app.include_router(mail_router)
+    app.include_router(mail_provider_router)
     app.include_router(verify_router)
     app.include_router(schedule_router)
 
@@ -93,6 +93,10 @@ def create_app() -> FastAPI:
     @app.get("/mail", response_class=HTMLResponse, include_in_schema=False)
     async def mail_page():
         return FileResponse(_STATIC_DIR / "mail.html")
+
+    @app.get("/mail-usages", response_class=HTMLResponse, include_in_schema=False)
+    async def mail_usages_page():
+        return FileResponse(_STATIC_DIR / "mail_usages.html")
 
     @app.get("/schedule", response_class=HTMLResponse, include_in_schema=False)
     async def schedule_page():

@@ -76,19 +76,58 @@ class TaskLogOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ─── 邮箱订单 ────────────────────────────────────────────────────────────────
+# ─── 邮件服务商 ───────────────────────────────────────────────────────────────
 
-class MailOrderOut(BaseModel):
+class MailProviderCreate(BaseModel):
+    provider_type: str = Field(..., description="cloudflare | duckmail | onlinemail")
+    name: str = Field(..., description="便于识别的名称，全局唯一")
+    config_json: str = Field("{}", description="服务商参数 JSON 字符串")
+    enabled: bool = True
+
+class MailProviderUpdate(BaseModel):
+    name: Optional[str] = None
+    config_json: Optional[str] = None
+    enabled: Optional[bool] = None
+
+class MailProviderAddOrders(BaseModel):
+    lines: str = Field(..., description="每行格式: email----orderId")
+
+class MailProviderOut(BaseModel):
     id: int
-    email: str
-    order_id: str
-    used: bool
+    provider_type: str
+    name: str
+    config_json: str
+    enabled: bool
+    orders_remaining: int        # orders_pool 中剩余条数
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
-class MailOrderBulkCreate(BaseModel):
-    lines: str = Field(..., description="每行格式: email----orderId，支持多行批量粘贴")
+
+# ─── 邮箱使用记录 ─────────────────────────────────────────────────────────────
+
+class EmailUsageOut(BaseModel):
+    id: int
+    provider_id: int
+    provider_name: Optional[str] = None
+    task_id: Optional[int]
+    email: str
+    order_id: Optional[str]
+    target_service: Optional[str]
+    status: str
+    api_key: Optional[str]
+    fail_reason: Optional[str]
+    created_at: datetime
+    finished_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+class EmailUsageListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: List[EmailUsageOut]
 
 
 # ─── Key 验证 ─────────────────────────────────────────────────────────────────
