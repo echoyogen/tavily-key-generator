@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>定时任务 - API Key 管理平台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/static/js/common.js"></script>
+</head>
+<body class="min-h-screen bg-gray-950 text-gray-200">
+
+  <nav class="bg-gray-900 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-6">
+      <span class="text-white font-bold text-lg">🔑 Key 管理平台</span>
+      <a href="/" class="text-gray-400 hover:text-gray-200 text-sm">Dashboard</a>
+      <a href="/accounts" class="text-gray-400 hover:text-gray-200 text-sm">账号管理</a>
+      <a href="/tasks" class="text-gray-400 hover:text-gray-200 text-sm">注册任务</a>
+      <a href="/mail" class="text-gray-400 hover:text-gray-200 text-sm">邮箱订单</a>
+      <a href="/schedule" class="text-blue-400 text-sm font-medium">定时任务</a>
+    </div>
+    <button onclick="clearToken(); window.location.href='/login'" class="text-gray-500 hover:text-red-400 text-sm transition">退出登录</button>
+  </nav>
+
+  <div x-data="scheduleApp()" class="max-w-6xl mx-auto px-6 py-6">
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- 左侧：创建定时任务 -->
+      <div class="lg:col-span-1">
+        <div class="bg-gray-900 border border-gray-700 rounded-xl p-5">
+          <h2 class="text-base font-semibold text-white mb-4">
+            <span x-text="editId ? '编辑定时任务' : '新建定时任务'"></span>
+          </h2>
+          <form @submit.prevent="save">
+            <div class="mb-3">
+              <label class="block text-xs text-gray-400 mb-1">目标平台</label>
+              <select x-model="form.service" :disabled="!!editId"
+                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white disabled:opacity-60">
+                <option value="tavily">Tavily</option>
+                <option value="firecrawl">Firecrawl</option>
+                <option value="exa">Exa</option>
+                <option value="you">You.com</option>
+                <option value="serper">Serper</option>
+                <option value="valyu">Valyu</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="block text-xs text-gray-400 mb-1">
+                Cron 表达式
+                <span class="text-gray-500 ml-1">（5段: 分 时 日 月 周）</span>
+              </label>
+              <input x-model="form.cron_expr" type="text" placeholder="0 2 * * *"
+                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono" />
+              <p class="text-xs text-gray-500 mt-1" x-text="cronHint(form.cron_expr)"></p>
+            </div>
+
+            <!-- 快速预设 -->
+            <div class="mb-3 flex flex-wrap gap-1">
+              <button type="button" @click="form.cron_expr='0 2 * * *'" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded transition">每天凌晨2点</button>
+              <button type="button" @click="form.cron_expr='0 */6 * * *'" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded transition">每6小时</button>
+              <button type="button" @click="form.cron_expr='0 8,20 * * *'" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded transition">每天8点和20点</button>
+              <button type="button" @click="form.cron_expr='0 0 * * 1'" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded transition">每周一</button>
+            </div>
+
+            <div class="mb-3">
+              <label class="block text-xs text-gray-400 mb-1">注册数量</label>
+              <input x-model.number="form.count" type="number" min="1"
+                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+            </div>
+            <div class="mb-3">
+              <label class="block text-xs text-gray-400 mb-1">并发数</label>
+              <input x-model.number="form.concurrency" type="number" min="1" max="20"
+                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+            </div>
+            <div class="mb-3">
+              <label class="block text-xs text-gray-400 mb-1">间隔（秒）</label>
+              <input x-model.number="form.delay" type="number" min="0"
+                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+            </div>
+            <div class="mb-4 flex items-center gap-2">
+              <input type="checkbox" x-model="form.upload" id="s-upload" class="rounded" />
+              <label for="s-upload" class="text-sm text-gray-300">完成后上传 Key 池</label>
+            </div>
+            <div class="mb-4 flex items-center gap-2">
+              <input type="checkbox" x-model="form.enabled" id="s-enabled" class="rounded" />
+              <label for="s-enabled" class="text-sm text-gray-300">启用</label>
+            </div>
+
+            <div class="flex gap-2">
+              <button type="submit" :disabled="saving"
+                class="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 text-white text-sm font-semibold py-2 rounded-lg transition"
+                x-text="saving ? '保存中...' : (editId ? '保存修改' : '创建任务')">
+              </button>
+              <button x-show="editId" type="button" @click="cancelEdit()"
+                class="px-3 bg-gray-700 hover:bg-gray-600 text-sm rounded-lg transition">取消</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- 右侧：定时任务列表 -->
+      <div class="lg:col-span-2">
+        <div class="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+            <h2 class="text-base font-semibold text-white">定时任务列表</h2>
+            <button @click="load()" class="text-gray-400 hover:text-white text-xs">刷新</button>
+          </div>
+
+          <template x-if="schedules.length === 0">
+            <div class="text-center py-12 text-gray-500">暂无定时任务</div>
+          </template>
+
+          <div class="divide-y divide-gray-800">
+            <template x-for="s in schedules" :key="s.id">
+              <div class="p-4 hover:bg-gray-800/30 transition">
+                <div class="flex items-start justify-between">
+                  <div class="flex-1">
+                    <div class="flex items-center gap-3 mb-2">
+                      <span class="font-medium text-blue-300 text-sm" x-text="serviceLabel(s.service)"></span>
+                      <code class="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-300 font-mono" x-text="s.cron_expr"></code>
+                      <span :class="s.enabled ? 'text-green-400' : 'text-gray-500'" class="text-xs"
+                            x-text="s.enabled ? '已启用' : '已禁用'"></span>
+                    </div>
+                    <div class="text-xs text-gray-400 space-y-0.5">
+                      <div>数量: <span class="text-white" x-text="s.count"></span>
+                        &nbsp; 并发: <span class="text-white" x-text="s.concurrency"></span>
+                        &nbsp; 间隔: <span class="text-white" x-text="s.delay"></span>s
+                        &nbsp; 上传: <span x-text="s.upload ? '是' : '否'"></span>
+                      </div>
+                      <div x-show="s.last_run_at">上次运行: <span x-text="fmtDate(s.last_run_at)"></span></div>
+                      <div x-show="s.next_run_at">下次运行: <span class="text-yellow-300" x-text="fmtDate(s.next_run_at)"></span></div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2 ml-4">
+                    <button @click="toggleEnabled(s)"
+                      :class="s.enabled ? 'text-yellow-400 hover:text-yellow-300' : 'text-green-400 hover:text-green-300'"
+                      class="text-xs transition"
+                      x-text="s.enabled ? '禁用' : '启用'">
+                    </button>
+                    <button @click="startEdit(s)" class="text-blue-400 hover:text-blue-300 text-xs transition">编辑</button>
+                    <button @click="deleteSchedule(s.id)" class="text-red-400 hover:text-red-300 text-xs transition">删除</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <script>
+    function scheduleApp() {
+      return {
+        schedules: [],
+        editId: null,
+        saving: false,
+        form: { service: 'firecrawl', cron_expr: '0 2 * * *', count: 5, concurrency: 2, delay: 10, upload: false, enabled: true },
+
+        serviceLabel: (s) => SERVICE_LABELS[s] || s,
+        fmtDate,
+
+        cronHint(expr) {
+          if (!expr) return '';
+          const p = expr.trim().split(/\s+/);
+          if (p.length !== 5) return '格式错误，需要5段';
+          const [min, hour, day, month, dow] = p;
+          if (min === '0' && hour !== '*' && day === '*' && month === '*' && dow === '*') {
+            return `每天 ${hour}:00 执行`;
+          }
+          if (min === '0' && hour.startsWith('*/')) {
+            return `每 ${hour.slice(2)} 小时执行`;
+          }
+          return '自定义计划';
+        },
+
+        async load() {
+          try {
+            this.schedules = await apiJson('/api/schedule');
+          } catch (e) { showToast('加载失败: ' + e.message, 'error'); }
+        },
+
+        async save() {
+          this.saving = true;
+          try {
+            if (this.editId) {
+              await apiJson('/api/schedule/' + this.editId, { method: 'PUT', body: JSON.stringify(this.form) });
+              showToast('已保存', 'success');
+            } else {
+              await apiJson('/api/schedule', { method: 'POST', body: JSON.stringify(this.form) });
+              showToast('已创建', 'success');
+            }
+            this.cancelEdit();
+            await this.load();
+          } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+          finally { this.saving = false; }
+        },
+
+        startEdit(s) {
+          this.editId = s.id;
+          this.form = { service: s.service, cron_expr: s.cron_expr, count: s.count, concurrency: s.concurrency, delay: s.delay, upload: s.upload, enabled: s.enabled };
+        },
+
+        cancelEdit() {
+          this.editId = null;
+          this.form = { service: 'firecrawl', cron_expr: '0 2 * * *', count: 5, concurrency: 2, delay: 10, upload: false, enabled: true };
+        },
+
+        async toggleEnabled(s) {
+          try {
+            await apiJson('/api/schedule/' + s.id, { method: 'PUT', body: JSON.stringify({ enabled: !s.enabled }) });
+            s.enabled = !s.enabled;
+            showToast(s.enabled ? '已启用' : '已禁用', 'success');
+            await this.load();
+          } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
+        },
+
+        async deleteSchedule(id) {
+          if (!confirm('确认删除该定时任务？')) return;
+          try {
+            await apiFetch('/api/schedule/' + id, { method: 'DELETE' });
+            showToast('已删除', 'success');
+            await this.load();
+          } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+        },
+
+        init() {
+          requireLogin();
+          this.load();
+        }
+      };
+    }
+  </script>
+</body>
+</html>

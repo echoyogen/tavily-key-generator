@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>账号管理 - API Key 管理平台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/static/js/common.js"></script>
+</head>
+<body class="min-h-screen bg-gray-950 text-gray-200">
+
+  <nav class="bg-gray-900 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-6">
+      <span class="text-white font-bold text-lg">🔑 Key 管理平台</span>
+      <a href="/" class="text-gray-400 hover:text-gray-200 text-sm">Dashboard</a>
+      <a href="/accounts" class="text-blue-400 text-sm font-medium">账号管理</a>
+      <a href="/tasks" class="text-gray-400 hover:text-gray-200 text-sm">注册任务</a>
+      <a href="/mail" class="text-gray-400 hover:text-gray-200 text-sm">邮箱订单</a>
+      <a href="/schedule" class="text-gray-400 hover:text-gray-200 text-sm">定时任务</a>
+    </div>
+    <button onclick="clearToken(); window.location.href='/login'" class="text-gray-500 hover:text-red-400 text-sm transition">退出登录</button>
+  </nav>
+
+  <div x-data="accountsApp()" class="max-w-7xl mx-auto px-6 py-6">
+
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-xl font-bold text-white">账号 & Key 管理</h1>
+      <div class="flex gap-2">
+        <button @click="exportCsv()" class="bg-gray-700 hover:bg-gray-600 text-sm px-3 py-1.5 rounded-lg transition">导出 CSV</button>
+        <button @click="verifySelected()" :disabled="selected.length === 0" class="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-sm px-3 py-1.5 rounded-lg transition">验证选中</button>
+        <button @click="deleteSelected()" :disabled="selected.length === 0" class="bg-red-700 hover:bg-red-600 disabled:opacity-50 text-sm px-3 py-1.5 rounded-lg transition">删除选中</button>
+      </div>
+    </div>
+
+    <!-- 筛选栏 -->
+    <div class="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-4 flex flex-wrap gap-3 items-end">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">平台</label>
+        <select x-model="filters.service" @change="loadPage(1)"
+          class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white">
+          <option value="">全部</option>
+          <option value="tavily">Tavily</option>
+          <option value="firecrawl">Firecrawl</option>
+          <option value="exa">Exa</option>
+          <option value="you">You.com</option>
+          <option value="serper">Serper</option>
+          <option value="valyu">Valyu</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">状态</label>
+        <select x-model="filters.is_valid" @change="loadPage(1)"
+          class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white">
+          <option value="">全部</option>
+          <option value="1">有效</option>
+          <option value="0">失效</option>
+          <option value="2">未验证</option>
+        </select>
+      </div>
+      <div class="flex-1 min-w-48">
+        <label class="block text-xs text-gray-400 mb-1">搜索</label>
+        <input x-model="filters.keyword" @input.debounce.500ms="loadPage(1)"
+          type="text" placeholder="邮箱 / API Key..."
+          class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">每页</label>
+        <select x-model="pageSize" @change="loadPage(1)"
+          class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white">
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 表格 -->
+    <div class="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-800 text-gray-400 text-xs uppercase">
+          <tr>
+            <th class="px-4 py-3 text-left w-8">
+              <input type="checkbox" @change="toggleSelectAll($event)" class="rounded" />
+            </th>
+            <th class="px-4 py-3 text-left">平台</th>
+            <th class="px-4 py-3 text-left">邮箱</th>
+            <th class="px-4 py-3 text-left">API Key</th>
+            <th class="px-4 py-3 text-left">状态</th>
+            <th class="px-4 py-3 text-left">创建时间</th>
+            <th class="px-4 py-3 text-left">上传</th>
+            <th class="px-4 py-3 text-left w-20">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-if="loading">
+            <tr><td colspan="8" class="text-center py-12 text-gray-500">加载中...</td></tr>
+          </template>
+          <template x-if="!loading && accounts.length === 0">
+            <tr><td colspan="8" class="text-center py-12 text-gray-500">暂无数据</td></tr>
+          </template>
+          <template x-for="acc in accounts" :key="acc.id">
+            <tr class="border-t border-gray-800 hover:bg-gray-800/50 transition">
+              <td class="px-4 py-3">
+                <input type="checkbox" :value="acc.id" x-model="selected" class="rounded" />
+              </td>
+              <td class="px-4 py-3">
+                <span class="text-xs font-medium text-blue-300" x-text="serviceLabel(acc.service)"></span>
+              </td>
+              <td class="px-4 py-3 text-gray-300 text-xs" x-text="acc.email"></td>
+              <td class="px-4 py-3">
+                <div class="flex items-center gap-2">
+                  <code class="text-xs text-green-300 font-mono" x-text="acc.api_key.substring(0, 24) + '...'"></code>
+                  <button @click="copy(acc.api_key)" class="text-gray-500 hover:text-blue-400 transition text-xs">复制</button>
+                </div>
+              </td>
+              <td class="px-4 py-3" x-html="validLabel(acc.is_valid)"></td>
+              <td class="px-4 py-3 text-gray-400 text-xs" x-text="fmtDateShort(acc.created_at)"></td>
+              <td class="px-4 py-3">
+                <span x-show="acc.uploaded" class="text-green-400 text-xs">已上传</span>
+                <span x-show="!acc.uploaded" class="text-gray-500 text-xs">未上传</span>
+              </td>
+              <td class="px-4 py-3">
+                <button @click="verifySingle(acc)" class="text-purple-400 hover:text-purple-300 text-xs mr-2">验证</button>
+                <button @click="deleteOne(acc.id)" class="text-red-400 hover:text-red-300 text-xs">删除</button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 分页 -->
+    <div class="flex items-center justify-between mt-4 text-sm">
+      <span class="text-gray-400">共 <span x-text="total"></span> 条</span>
+      <div class="flex gap-2">
+        <button @click="loadPage(currentPage - 1)" :disabled="currentPage <= 1"
+          class="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 transition">上一页</button>
+        <span class="px-3 py-1 text-gray-300">
+          <span x-text="currentPage"></span> / <span x-text="totalPages"></span>
+        </span>
+        <button @click="loadPage(currentPage + 1)" :disabled="currentPage >= totalPages"
+          class="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 transition">下一页</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+
+  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <script>
+    function accountsApp() {
+      return {
+        accounts: [],
+        selected: [],
+        total: 0,
+        currentPage: 1,
+        pageSize: 20,
+        loading: true,
+        filters: { service: '', is_valid: '', keyword: '' },
+
+        get totalPages() {
+          return Math.max(1, Math.ceil(this.total / parseInt(this.pageSize)));
+        },
+
+        serviceLabel: (s) => SERVICE_LABELS[s] || s,
+        fmtDateShort,
+        validLabel,
+
+        async loadPage(page) {
+          if (page < 1 || page > this.totalPages) return;
+          this.loading = true;
+          this.selected = [];
+          try {
+            const params = new URLSearchParams({
+              page,
+              page_size: this.pageSize,
+              ...(this.filters.service && { service: this.filters.service }),
+              ...(this.filters.is_valid !== '' && { is_valid: this.filters.is_valid }),
+              ...(this.filters.keyword && { keyword: this.filters.keyword }),
+            });
+            const data = await apiJson('/api/accounts?' + params);
+            this.accounts = data.items;
+            this.total = data.total;
+            this.currentPage = page;
+          } catch (e) {
+            showToast('加载失败: ' + e.message, 'error');
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        toggleSelectAll(e) {
+          this.selected = e.target.checked ? this.accounts.map(a => a.id) : [];
+        },
+
+        async copy(text) {
+          await copyText(text);
+          showToast('已复制', 'success', 1500);
+        },
+
+        async deleteOne(id) {
+          if (!confirm('确认删除该账号？')) return;
+          try {
+            await apiFetch('/api/accounts/' + id, { method: 'DELETE' });
+            showToast('已删除', 'success');
+            await this.loadPage(this.currentPage);
+          } catch (e) {
+            showToast('删除失败: ' + e.message, 'error');
+          }
+        },
+
+        async deleteSelected() {
+          if (!confirm(`确认删除选中的 ${this.selected.length} 条？`)) return;
+          try {
+            const params = this.selected.map(id => `ids=${id}`).join('&');
+            await apiFetch('/api/accounts?' + params, { method: 'DELETE' });
+            showToast(`已删除 ${this.selected.length} 条`, 'success');
+            await this.loadPage(this.currentPage);
+          } catch (e) {
+            showToast('删除失败: ' + e.message, 'error');
+          }
+        },
+
+        async verifySingle(acc) {
+          showToast('验证中...', 'info', 1500);
+          try {
+            const results = await apiJson('/api/verify', {
+              method: 'POST',
+              body: JSON.stringify({ ids: [acc.id] }),
+            });
+            const r = results[0];
+            acc.is_valid = r.is_valid;
+            showToast(`验证结果: ${r.message}`, r.is_valid === 1 ? 'success' : 'warning');
+          } catch (e) {
+            showToast('验证失败: ' + e.message, 'error');
+          }
+        },
+
+        async verifySelected() {
+          showToast(`验证 ${this.selected.length} 个 Key 中...`, 'info');
+          try {
+            const results = await apiJson('/api/verify', {
+              method: 'POST',
+              body: JSON.stringify({ ids: this.selected }),
+            });
+            const valid = results.filter(r => r.is_valid === 1).length;
+            showToast(`验证完成：${valid}/${results.length} 有效`, 'success');
+            await this.loadPage(this.currentPage);
+          } catch (e) {
+            showToast('验证失败: ' + e.message, 'error');
+          }
+        },
+
+        exportCsv() {
+          const params = new URLSearchParams({
+            ...(this.filters.service && { service: this.filters.service }),
+            ...(this.filters.is_valid !== '' && { is_valid: this.filters.is_valid }),
+          });
+          const token = getToken();
+          window.open('/api/accounts/export/csv?' + params + `&token_unused=1`, '_blank');
+          // 带 Authorization header 的下载需特殊处理
+          apiFetch('/api/accounts/export/csv?' + params)
+            .then(r => r.blob())
+            .then(blob => {
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `accounts_${this.filters.service || 'all'}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            })
+            .catch(e => showToast('导出失败: ' + e.message, 'error'));
+        },
+
+        init() {
+          requireLogin();
+          // 从 URL 参数读取初始筛选
+          const urlParams = new URLSearchParams(window.location.search);
+          if (urlParams.get('service')) this.filters.service = urlParams.get('service');
+          this.loadPage(1);
+        }
+      };
+    }
+  </script>
+</body>
+</html>

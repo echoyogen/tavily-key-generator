@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>邮箱订单 - API Key 管理平台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/static/js/common.js"></script>
+</head>
+<body class="min-h-screen bg-gray-950 text-gray-200">
+
+  <nav class="bg-gray-900 border-b border-gray-700 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-6">
+      <span class="text-white font-bold text-lg">🔑 Key 管理平台</span>
+      <a href="/" class="text-gray-400 hover:text-gray-200 text-sm">Dashboard</a>
+      <a href="/accounts" class="text-gray-400 hover:text-gray-200 text-sm">账号管理</a>
+      <a href="/tasks" class="text-gray-400 hover:text-gray-200 text-sm">注册任务</a>
+      <a href="/mail" class="text-blue-400 text-sm font-medium">邮箱订单</a>
+      <a href="/schedule" class="text-gray-400 hover:text-gray-200 text-sm">定时任务</a>
+    </div>
+    <button onclick="clearToken(); window.location.href='/login'" class="text-gray-500 hover:text-red-400 text-sm transition">退出登录</button>
+  </nav>
+
+  <div x-data="mailApp()" class="max-w-6xl mx-auto px-6 py-6">
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- 左侧：批量添加 -->
+      <div class="lg:col-span-1">
+        <div class="bg-gray-900 border border-gray-700 rounded-xl p-5">
+          <h2 class="text-base font-semibold text-white mb-1">批量添加订单</h2>
+          <p class="text-xs text-gray-400 mb-3">每行格式：<code class="bg-gray-800 px-1 rounded">email----orderId</code></p>
+          <textarea
+            x-model="bulkInput"
+            rows="10"
+            placeholder="example@domain.com----order123&#10;another@domain.com----order456"
+            class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 font-mono resize-none focus:outline-none focus:border-blue-500"
+          ></textarea>
+          <button @click="bulkAdd()" :disabled="!bulkInput.trim() || adding"
+            class="mt-3 w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 text-white text-sm font-semibold py-2 rounded-lg transition">
+            <span x-text="adding ? '添加中...' : '批量添加'"></span>
+          </button>
+          <div x-show="addResult" class="mt-3 p-3 bg-gray-800 rounded-lg text-xs text-gray-300" x-text="addResult"></div>
+
+          <!-- 统计 -->
+          <div class="mt-4 pt-4 border-t border-gray-700 grid grid-cols-2 gap-2 text-center">
+            <div class="bg-gray-800 rounded-lg p-3">
+              <div class="text-2xl font-bold text-white" x-text="unusedCount"></div>
+              <div class="text-xs text-gray-400">未使用</div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-3">
+              <div class="text-2xl font-bold text-gray-400" x-text="usedCount"></div>
+              <div class="text-xs text-gray-400">已使用</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧：订单列表 -->
+      <div class="lg:col-span-2">
+        <div class="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
+          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+            <h2 class="text-base font-semibold text-white">邮箱订单列表</h2>
+            <div class="flex items-center gap-3">
+              <select x-model="filterUsed" @change="loadPage(1)"
+                class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white">
+                <option value="">全部</option>
+                <option value="false">未使用</option>
+                <option value="true">已使用</option>
+              </select>
+              <button @click="deleteSelected()" :disabled="selected.length === 0"
+                class="text-red-400 hover:text-red-300 text-xs disabled:opacity-40">删除选中</button>
+            </div>
+          </div>
+
+          <table class="w-full text-sm">
+            <thead class="bg-gray-800 text-gray-400 text-xs uppercase">
+              <tr>
+                <th class="px-4 py-3 text-left w-8">
+                  <input type="checkbox" @change="toggleAll($event)" class="rounded" />
+                </th>
+                <th class="px-4 py-3 text-left">邮箱</th>
+                <th class="px-4 py-3 text-left">Order ID</th>
+                <th class="px-4 py-3 text-left">状态</th>
+                <th class="px-4 py-3 text-left">创建时间</th>
+                <th class="px-4 py-3 text-left w-16">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-if="orders.length === 0">
+                <tr><td colspan="6" class="text-center py-10 text-gray-500">暂无数据</td></tr>
+              </template>
+              <template x-for="o in orders" :key="o.id">
+                <tr class="border-t border-gray-800 hover:bg-gray-800/50">
+                  <td class="px-4 py-2">
+                    <input type="checkbox" :value="o.id" x-model="selected" class="rounded" />
+                  </td>
+                  <td class="px-4 py-2 text-xs text-gray-300" x-text="o.email"></td>
+                  <td class="px-4 py-2 text-xs font-mono text-gray-400" x-text="o.order_id"></td>
+                  <td class="px-4 py-2">
+                    <span :class="o.used ? 'text-gray-500' : 'text-green-400'" class="text-xs"
+                          x-text="o.used ? '已使用' : '可用'"></span>
+                  </td>
+                  <td class="px-4 py-2 text-xs text-gray-500" x-text="fmtDateShort(o.created_at)"></td>
+                  <td class="px-4 py-2">
+                    <button @click="deleteOne(o.id)" class="text-red-400 hover:text-red-300 text-xs">删除</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+
+          <!-- 分页 -->
+          <div class="px-4 py-3 border-t border-gray-700 flex items-center justify-between text-xs text-gray-400">
+            <span>共 <span x-text="total"></span> 条</span>
+            <div class="flex gap-2">
+              <button @click="loadPage(page - 1)" :disabled="page <= 1"
+                class="px-2 py-1 bg-gray-800 rounded disabled:opacity-40">上一页</button>
+              <span class="px-2 py-1"><span x-text="page"></span>/<span x-text="totalPages"></span></span>
+              <button @click="loadPage(page + 1)" :disabled="page >= totalPages"
+                class="px-2 py-1 bg-gray-800 rounded disabled:opacity-40">下一页</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <script>
+    function mailApp() {
+      return {
+        orders: [],
+        selected: [],
+        total: 0, page: 1, pageSize: 20,
+        filterUsed: '',
+        bulkInput: '',
+        addResult: '',
+        adding: false,
+        unusedCount: 0,
+        usedCount: 0,
+
+        fmtDateShort,
+
+        get totalPages() { return Math.max(1, Math.ceil(this.total / this.pageSize)); },
+
+        async loadPage(p) {
+          if (p < 1 || p > this.totalPages) return;
+          this.selected = [];
+          try {
+            const params = new URLSearchParams({ page: p, page_size: this.pageSize });
+            if (this.filterUsed !== '') params.set('used', this.filterUsed);
+            const data = await apiJson('/api/mail-orders?' + params);
+            this.orders = data.items;
+            this.total = data.total;
+            this.page = p;
+          } catch (e) { showToast('加载失败: ' + e.message, 'error'); }
+        },
+
+        async loadCounts() {
+          try {
+            const [u, used] = await Promise.all([
+              apiJson('/api/mail-orders?used=false&page=1&page_size=1'),
+              apiJson('/api/mail-orders?used=true&page=1&page_size=1'),
+            ]);
+            this.unusedCount = u.total;
+            this.usedCount = used.total;
+          } catch {}
+        },
+
+        async bulkAdd() {
+          this.adding = true;
+          this.addResult = '';
+          try {
+            const r = await apiJson('/api/mail-orders', {
+              method: 'POST',
+              body: JSON.stringify({ lines: this.bulkInput }),
+            });
+            this.addResult = `新增 ${r.inserted} 条，跳过 ${r.skipped} 条（重复）`;
+            this.bulkInput = '';
+            await this.loadPage(1);
+            await this.loadCounts();
+          } catch (e) { showToast('添加失败: ' + e.message, 'error'); }
+          finally { this.adding = false; }
+        },
+
+        toggleAll(e) { this.selected = e.target.checked ? this.orders.map(o => o.id) : []; },
+
+        async deleteOne(id) {
+          if (!confirm('删除该订单？')) return;
+          try {
+            await apiFetch('/api/mail-orders/' + id, { method: 'DELETE' });
+            showToast('已删除', 'success');
+            await this.loadPage(this.page);
+            await this.loadCounts();
+          } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+        },
+
+        async deleteSelected() {
+          if (!confirm(`删除选中的 ${this.selected.length} 条？`)) return;
+          try {
+            const params = this.selected.map(id => `ids=${id}`).join('&');
+            await apiFetch('/api/mail-orders?' + params, { method: 'DELETE' });
+            showToast(`已删除 ${this.selected.length} 条`, 'success');
+            await this.loadPage(this.page);
+            await this.loadCounts();
+          } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
+        },
+
+        init() {
+          requireLogin();
+          this.loadPage(1);
+          this.loadCounts();
+        }
+      };
+    }
+  </script>
+</body>
+</html>

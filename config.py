@@ -130,3 +130,14 @@ SOLVER_THREADS = _get_int("SOLVER_THREADS", 1)
 PROXY_ENABLED = _get_bool("PROXY_ENABLED", False)
 PROXY_LIST = _get_list("PROXY_LIST")
 PROXY_GEOIP = _get_bool("PROXY_GEOIP", True)
+
+# Web 管理服务配置
+WEB_ADMIN_USER = _get_str("WEB_ADMIN_USER", "admin")
+WEB_ADMIN_PASSWORD = _get_str("WEB_ADMIN_PASSWORD", "changeme")
+WEB_SECRET_KEY = _get_str("WEB_SECRET_KEY", "change-this-to-a-random-secret-string")
+WEB_PORT = _get_int("WEB_PORT", 8086)
+
+# 数据库配置
+DB_TYPE = _get_str("DB_TYPE", "sqlite").lower()          # "sqlite" | "postgresql"
+DB_PATH = _get_str("DB_PATH", "web/data.db")             # SQLite 文件路径
+DB_URL = _get_str("DB_URL", "")                          # PostgreSQL 连接 URL
