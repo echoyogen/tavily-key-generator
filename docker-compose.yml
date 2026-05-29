@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    command: python web_start.py
+    ports:
+      - "8086:8086"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    depends_on:
+      - solver
+
+  solver:
+    build: .
+    command: python api_solver.py --browser_type chromium --thread 2 --port 5073
+    env_file:
+      - .env
+    volumes:
+      - .:/app
