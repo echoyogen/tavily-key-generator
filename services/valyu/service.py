@@ -125,7 +125,9 @@ class ValyuService(BaseService):
                 return self._browser_fallback(email, password)
 
             # Step 5: 访问验证链接，失败直接 fallback（warn-and-continue 会导致 Step 6 email_not_confirmed）
-            if not self._verify_via_link(sess, verify_link):
+            # _access_token_from_verify 当前恒为 None（Supabase 使用 URL fragment，requests 无法获取）
+            verify_ok, _access_token_from_verify = self._verify_via_link(sess, verify_link)
+            if not verify_ok:
                 print("[valyu] Step 5 failed: verify link did not land on platform, falling back to browser")
                 return self._browser_fallback(email, password)
 
@@ -306,20 +308,42 @@ class ValyuService(BaseService):
         return link
 
     def _verify_via_link(self, sess, link):
+        """Follow verify link, log redirect chain, detect error params.
+
+        Returns (bool, None) — access_token extraction reserved for future:
+        Supabase uses URL fragment which requests cannot access.
+        """
         try:
             r = sess.get(link, headers=_NAV_HEADERS, allow_redirects=True, timeout=60)
         except Exception as e:
             print(f"[valyu] Verify link request failed: {e}")
-            return False
+            return (False, None)
+
+        # Log complete redirect chain
+        chain = r.history + [r]
+        for i, resp in enumerate(chain):
+            url_safe = (resp.url or "")[:80]
+            loc_safe = (resp.headers.get("Location") or "")[:80]
+            self._log("step5", f"redirect[{i}]: {resp.status_code} {url_safe} -> {loc_safe}")
+
+        final_url = r.url if hasattr(r, "url") else ""
+        self._log("step5", f"final_url={final_url[:120]!r}")
+
+        # Detect error query params
+        import urllib.parse as _urlparse
+        qs = _urlparse.parse_qs(_urlparse.urlparse(final_url).query)
+        if "error" in qs or "error_code" in qs:
+            err = qs.get("error", qs.get("error_code", []))[0]
+            self._log("step5", f"FAIL: error param detected: {err!r}")
+            return (False, None)
 
         time.sleep(2)
 
-        final_url = r.url.lower() if hasattr(r, "url") else ""
-        if r.status_code not in range(200, 400) or "platform.valyu.ai" not in final_url:
+        if r.status_code not in range(200, 400) or "platform.valyu.ai" not in final_url.lower():
             print(f"[valyu] WARNING: verify link may have failed (status={r.status_code}, url={r.url})")
-            return False
+            return (False, None)
 
-        return True
+        return (True, None)
 
     def _password_login(self, sess, email, password):
         try:
