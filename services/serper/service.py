@@ -1,9 +1,11 @@
+import json
 import random
 import re
 import string
 import time
 
 import requests
+from patchright.sync_api import sync_playwright
 
 from services.base import BaseService
 from services.common.browser import fill_first_input, submit_form, attach_response_tracker
@@ -67,44 +69,115 @@ def _wait_for_signup_result(page, signup_events, timeout=15):
 _HTTP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 
 
-def _extract_csrf(html):
-    """Extract CSRF token from HTML page. Returns None if not found."""
-    import re as _re
-    patterns = [
-        r'<input[^>]*name=["\']_token["\'][^>]*value=["\']([^"\']+)["\']',
-        r'<input[^>]*value=["\']([^"\']+)["\'][^>]*name=["\']_token["\']',
-        r'<meta[^>]*name=["\']csrf-token["\'][^>]*content=["\']([^"\']+)["\']',
-    ]
-    for pat in patterns:
-        m = _re.search(pat, html, _re.IGNORECASE)
-        if m:
-            return m.group(1)
-    return None
+def _intercept_form_submission(page_url, route_pattern, form_filler, timeout=90):
+    """
+    Open page_url with patchright, intercept route_pattern request,
+    call form_filler(page) to trigger form submission, abort the real request,
+    and return the captured request body as a dict.
+    Raises RuntimeError("captcha solve timeout") if timeout is exceeded.
+    """
+    captured = {}
+
+    def _handler(route):
+        try:
+            raw = route.request.post_data
+            if raw:
+                captured["body"] = json.loads(raw)
+        except Exception:
+            captured["body"] = {}
+        finally:
+            try:
+                route.abort()
+            except Exception:
+                pass
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.route(route_pattern, _handler)
+            page.goto(page_url, wait_until="networkidle", timeout=60000)
+            form_filler(page)
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if captured.get("body") is not None:
+                    return captured["body"]
+                time.sleep(0.5)
+            raise RuntimeError("captcha solve timeout")
+        finally:
+            browser.close()
 
 
-def _detect_http_signup_result(resp):
-    """Detect the result of an HTTP signup response. Returns: 'sent', 'exists', 'blocked', or 'unknown'."""
-    combined = (resp.text or "").lower()
-    final_url = (getattr(resp, "url", "") or "").lower()
+def _fill_signup_form(page, email, password, first_name, last_name):
+    try:
+        for sel in ['input[name="firstName"]', 'input[placeholder*="first" i]']:
+            el = page.query_selector(sel)
+            if el:
+                el.fill(first_name)
+                break
+    except Exception:
+        pass
+    try:
+        for sel in ['input[name="lastName"]', 'input[placeholder*="last" i]']:
+            el = page.query_selector(sel)
+            if el:
+                el.fill(last_name)
+                break
+    except Exception:
+        pass
+    try:
+        for sel in ['input[type="email"]', 'input[name="email"]']:
+            el = page.query_selector(sel)
+            if el:
+                el.fill(email)
+                break
+    except Exception:
+        pass
+    try:
+        for sel in ['input[type="password"]', 'input[name="password"]', 'input[name="password1"]']:
+            el = page.query_selector(sel)
+            if el:
+                el.fill(password)
+                break
+    except Exception:
+        pass
+    time.sleep(2)
+    try:
+        for sel in ['button[type="submit"]', 'button:has-text("Sign up")', 'button:has-text("Create Account")', 'button:has-text("Register")']:
+            el = page.query_selector(sel)
+            if el:
+                el.click()
+                break
+    except Exception:
+        pass
 
-    if "verify-email" in final_url or "check-email" in final_url:
-        return "sent"
-    if "check your email" in combined or "verify your email" in combined or "verification email" in combined:
-        return "sent"
-    if "already registered" in combined or "email already exists" in combined or "already in use" in combined:
-        return "exists"
-    if "cannot register at this time" in combined or "blocked" in combined:
-        return "blocked"
-    return "unknown"
 
-
-def _extract_serper_key(html):
-    """Extract a Serper API key (32 alphanumeric chars) from HTML."""
-    import re as _re
-    matches = _re.findall(r"[A-Za-z0-9]{32,}", html)
-    if matches:
-        return matches[0]
-    return None
+def _fill_login_form(page, email, password):
+    try:
+        for sel in ['input[type="email"]', 'input[name="email"]']:
+            el = page.query_selector(sel)
+            if el:
+                el.fill(email)
+                break
+    except Exception:
+        pass
+    try:
+        for sel in ['input[type="password"]', 'input[name="password"]']:
+            el = page.query_selector(sel)
+            if el:
+                el.fill(password)
+                break
+    except Exception:
+        pass
+    time.sleep(2)
+    try:
+        for sel in ['button[type="submit"]', 'button:has-text("Sign in")', 'button:has-text("Login")']:
+            el = page.query_selector(sel)
+            if el:
+                el.click()
+                break
+    except Exception:
+        pass
 
 
 class SerperService(BaseService):
@@ -115,62 +188,152 @@ class SerperService(BaseService):
     headless_config_key = "SERPER_REGISTER_HEADLESS"
 
     def register(self, email, password):
-        """HTTP primary path. Falls back to _browser_fallback on any error."""
         import config
         from mail.factory import get_provider
 
-        sess = requests.Session()
-        headers = {"User-Agent": _HTTP_UA, "Referer": "https://serper.dev/"}
         try:
-            # Step 1: GET signup page and extract CSRF token (if any)
-            signup_page = sess.get("https://serper.dev/signup", headers=headers, timeout=15)
-            csrf_token = _extract_csrf(signup_page.text)
+            first_name = _rand_str(5).capitalize()
+            last_name = _rand_str(6).capitalize()
 
-            # Step 2: POST signup form
-            full_name = f"{_rand_str(5).capitalize()} {_rand_str(6).capitalize()}"
-            form_data = {"name": full_name, "email": email, "password": password}
-            if csrf_token:
-                form_data["_token"] = csrf_token
-            resp = sess.post(
-                "https://serper.dev/signup",
-                data=form_data,
-                headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
-                allow_redirects=True,
-                timeout=15,
+            # Step A: use patchright to open signup page, intercept /auth/register, get dual tokens
+            signup_body = _intercept_form_submission(
+                page_url="https://serper.dev/signup",
+                route_pattern="**/auth/register",
+                form_filler=lambda page: _fill_signup_form(page, email, password, first_name, last_name),
+                timeout=90,
             )
+            recaptcha_token = signup_body.get("recaptchaToken", "")
+            turnstile_token = signup_body.get("turnstileToken", "")
+            if not recaptcha_token or not turnstile_token:
+                raise RuntimeError(f"captcha tokens missing from intercepted body: {signup_body}")
 
-            # Step 3: detect signup result
-            status = _detect_http_signup_result(resp)
-            if status not in ("sent", "exists"):
-                raise RuntimeError(f"Signup failed with status: {status}, body: {resp.text[:200]}")
+            # Step B: HTTP registration
+            sess = requests.Session()
+            resp = sess.post(
+                "https://api.serper.dev/auth/register",
+                json={
+                    "email": email,
+                    "password": password,
+                    "firstName": first_name,
+                    "lastName": last_name,
+                    "recaptchaToken": recaptcha_token,
+                    "turnstileToken": turnstile_token,
+                },
+                headers={
+                    "Origin": "https://serper.dev",
+                    "Referer": "https://serper.dev/signup",
+                    "Content-Type": "application/json",
+                    "User-Agent": _HTTP_UA,
+                },
+                timeout=30,
+            )
+            if resp.status_code >= 400:
+                body_text = resp.text[:300]
+                if "Captcha is invalid" in resp.text:
+                    raise RuntimeError("captcha rejected by server")
+                if "error.unique.email" in resp.text or "already" in resp.text.lower():
+                    raise RuntimeError("email already exists")
+                raise RuntimeError(f"register failed {resp.status_code}: {body_text}")
 
-            # Step 4: wait for verification link
+            # Step C: wait for verification email, extract token
             verify_link = get_provider().get_verification_link(email, timeout=config.EMAIL_CODE_TIMEOUT)
             if not verify_link:
                 raise RuntimeError("No verification email received")
+            m = re.search(r'confirm-email\?token=([A-Za-z0-9._\-]+)', verify_link)
+            if not m:
+                raise RuntimeError(f"Could not extract verify token from link: {verify_link}")
+            verify_token = m.group(1)
 
-            # Step 5: follow verification link
-            sess.get(verify_link, allow_redirects=True, headers=headers, timeout=60)
+            # Step D: HTTP email verification
+            resp = sess.post(
+                "https://api.serper.dev/users/verify-email",
+                json={"token": verify_token},
+                headers={
+                    "Origin": "https://serper.dev",
+                    "Content-Type": "application/json",
+                    "User-Agent": _HTTP_UA,
+                },
+                timeout=15,
+            )
+            if resp.status_code >= 400:
+                raise RuntimeError(f"email verify failed {resp.status_code}: {resp.text[:200]}")
 
-            # Step 6: navigate to dashboard and extract API key
+            # Step E: use patchright to open login page, intercept /auth/login, get login turnstile token
+            login_body = _intercept_form_submission(
+                page_url="https://serper.dev/login",
+                route_pattern="**/auth/login",
+                form_filler=lambda page: _fill_login_form(page, email, password),
+                timeout=90,
+            )
+            login_turnstile_token = login_body.get("turnstileToken", "")
+            if not login_turnstile_token:
+                raise RuntimeError(f"login turnstile token missing: {login_body}")
+
+            # Step F: HTTP login
+            resp = sess.post(
+                "https://api.serper.dev/auth/login",
+                json={
+                    "email": email,
+                    "password": password,
+                    "turnstileToken": login_turnstile_token,
+                },
+                headers={
+                    "Origin": "https://serper.dev",
+                    "Referer": "https://serper.dev/login",
+                    "Content-Type": "application/json",
+                    "User-Agent": _HTTP_UA,
+                },
+                timeout=15,
+            )
+            if resp.status_code >= 400:
+                raise RuntimeError(f"login failed {resp.status_code}: {resp.text[:200]}")
+            login_data = resp.json()
+            if login_data.get("isTwoFactorEnabled"):
+                raise NotImplementedError("2FA not supported")
+
+            # Step G: get or create API key
+            resp = sess.get(
+                "https://api.serper.dev/users/api-keys",
+                headers={
+                    "Origin": "https://serper.dev",
+                    "User-Agent": _HTTP_UA,
+                },
+                timeout=15,
+            )
             api_key = None
-            for url in ["https://serper.dev/dashboard", "https://serper.dev/api-keys"]:
-                r = sess.get(url, allow_redirects=True, headers=headers, timeout=15)
-                api_key = _extract_serper_key(r.text)
-                if api_key:
-                    break
+            if resp.status_code == 200:
+                keys = resp.json().get("data", [])
+                if keys:
+                    k = keys[0]
+                    api_key = k.get("key") or k.get("apiKey") or k.get("value")
             if not api_key:
-                raise RuntimeError("Could not extract API key from dashboard")
+                resp = sess.post(
+                    "https://api.serper.dev/users/api-keys",
+                    json={"name": "default"},
+                    headers={
+                        "Origin": "https://serper.dev",
+                        "Content-Type": "application/json",
+                        "User-Agent": _HTTP_UA,
+                    },
+                    timeout=15,
+                )
+                if resp.status_code < 400:
+                    data = resp.json()
+                    api_key = data.get("key") or data.get("apiKey") or data.get("value")
+
+            # Step H: return
+            if not api_key:
+                raise RuntimeError("api key not found in response")
 
             self._do_post_verify(api_key)
             self._save_result(email, password, api_key)
             return api_key
+
         except Exception as e:
             print(f"[serper] HTTP flow error: {e}, falling back to browser")
             return self._browser_fallback(email, password)
 
     def _browser_fallback(self, email, password):
-        """Browser fallback: executes full browser-based registration flow."""
         try:
             browser_cm = BaseService._open_browser(self)
             browser = browser_cm.__enter__()

@@ -1,3 +1,6 @@
+import os
+os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', os.path.expanduser('~/.cache/ms-playwright'))
+
 import contextlib
 import threading
 from abc import ABC, abstractmethod

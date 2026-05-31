@@ -1,4 +1,6 @@
 import os
+os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', os.path.expanduser('~/.cache/ms-playwright'))
+
 import time
 import random
 import asyncio
