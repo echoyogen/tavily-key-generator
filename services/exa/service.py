@@ -237,6 +237,7 @@ class ExaService(BaseService):
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
+            json_body={"query": "test", "numResults": 1},
         )
 
     def _save_result(self, email, password, api_key):

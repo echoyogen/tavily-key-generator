@@ -15,6 +15,9 @@ from web.database import get_db
 from web.models import Account
 from web.schemas import VerifyRequest, VerifyResult
 
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/verify", tags=["verify"])
 
 # 各平台验证配置
@@ -22,17 +25,19 @@ _VERIFY_CONFIGS = {
     "tavily": {
         "endpoint": "https://api.tavily.com/search",
         "headers": lambda k: {"Authorization": f"Bearer {k}", "Content-Type": "application/json"},
-        "body": '{"query":"test","max_results":1}',
+        "json_body": {"query": "test", "max_results": 1},
         "expected_status": 200,
     },
     "firecrawl": {
         "endpoint": "https://api.firecrawl.dev/v2/scrape",
         "headers": lambda k: {"Authorization": f"Bearer {k}", "Content-Type": "application/json"},
+        "json_body": {"url": "https://www.example.com"},
         "expected_status": 200,
     },
     "exa": {
         "endpoint": "https://api.exa.ai/search",
         "headers": lambda k: {"x-api-key": k, "Content-Type": "application/json"},
+        "json_body": {"query": "test", "numResults": 1},
         "expected_status": 200,
     },
     "you": {
@@ -45,11 +50,13 @@ _VERIFY_CONFIGS = {
     "serper": {
         "endpoint": "https://google.serper.dev/search",
         "headers": lambda k: {"X-API-KEY": k, "Content-Type": "application/json"},
+        "json_body": {"q": "test"},
         "expected_status": 200,
     },
     "valyu": {
         "endpoint": "https://api.valyu.ai/v1/search",
         "headers": lambda k: {"x-api-key": k, "Content-Type": "application/json"},
+        "json_body": {"query": "test", "max_num_results": 1},
         "expected_status": 200,
     },
 }
@@ -75,16 +82,23 @@ def _do_verify(service: str, api_key: str) -> int:
             resp = requests.post(
                 cfg["endpoint"],
                 headers=cfg["headers"](api_key),
-                json={"query": "test", "max_results": 1},
+                json=cfg.get("json_body"),
                 timeout=20,
             )
+        key_hint = f"{api_key[:16]}..." if len(api_key) > 16 else api_key
         if resp.status_code == cfg.get("expected_status", 200):
             return 1
         if resp.status_code in (401, 403):
+            logger.info("key invalid [%s][%s]: HTTP %d", service, key_hint, resp.status_code)
             return 0
-        # 其他状态码（如 429 rate limit）保守标记为未验证
+        logger.info(
+            "key inconclusive [%s][%s]: HTTP %d | %.120s",
+            service, key_hint, resp.status_code, resp.text.strip(),
+        )
         return 2
-    except Exception:
+    except Exception as exc:
+        key_hint = f"{api_key[:16]}..." if len(api_key) > 16 else api_key
+        logger.warning("key verify error [%s][%s]: %s", service, key_hint, exc)
         return 2
 
 

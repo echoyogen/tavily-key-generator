@@ -473,10 +473,13 @@ class SerperService(BaseService):
         raise NotImplementedError
 
     def _do_post_verify(self, api_key):
+        if not api_key:
+            return
         result = verify_api_key(
             api_key,
             "https://google.serper.dev/search",
             lambda k: {"X-API-KEY": k, "Content-Type": "application/json"},
+            json_body={"q": "test"},
         )
         if result is False:
             print("Warning: API key verification failed, saving anyway")

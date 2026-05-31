@@ -308,8 +308,11 @@ class FirecrawlService(BaseService):
             return None
 
     def _do_post_verify(self, api_key):
+        if not api_key:
+            return
         verify_api_key(
             api_key,
             "https://api.firecrawl.dev/v2/scrape",
-            lambda k: {"Authorization": f"Bearer {k}"},
+            lambda k: {"Authorization": f"Bearer {k}", "Content-Type": "application/json"},
+            json_body={"url": "https://www.example.com"},
         )

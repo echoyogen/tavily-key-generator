@@ -662,8 +662,11 @@ class TavilyService(BaseService):
         raise NotImplementedError("TavilyService uses HTTP-primary flow")
 
     def _do_post_verify(self, api_key):
+        if not api_key:
+            return
         _verify_key(
             api_key,
             endpoint="https://api.tavily.com/search",
-            headers_builder=lambda k: {"Authorization": f"Bearer {k}"},
+            headers_builder=lambda k: {"Authorization": f"Bearer {k}", "Content-Type": "application/json"},
+            json_body={"query": "test", "max_results": 1},
         )
