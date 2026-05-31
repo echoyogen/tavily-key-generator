@@ -87,6 +87,11 @@ class ValyuService(BaseService):
     output_file = "valyu_accounts.txt"
     headless_config_key = "VALYU_REGISTER_HEADLESS"
 
+    # --- helpers ---
+    @staticmethod
+    def _log(step: str, msg: str) -> None:
+        print(f"[valyu][{step}] {msg}")
+
     # ------------------------------------------------------------------
     # 主入口 (Task 6)
     # ------------------------------------------------------------------
@@ -119,9 +124,10 @@ class ValyuService(BaseService):
                 print("[valyu] Step 4 failed: verification email not received, falling back to browser")
                 return self._browser_fallback(email, password)
 
-            # Step 5: 访问验证链接（失败只 warn，继续，cookies 可能已设置）
-            self._verify_via_link(sess, verify_link)
-            time.sleep(2)
+            # Step 5: 访问验证链接，失败直接 fallback（warn-and-continue 会导致 Step 6 email_not_confirmed）
+            if not self._verify_via_link(sess, verify_link):
+                print("[valyu] Step 5 failed: verify link did not land on platform, falling back to browser")
+                return self._browser_fallback(email, password)
 
             # Step 6: 密码登录获取 access_token
             access_token = self._password_login(sess, email, password)
@@ -151,7 +157,8 @@ class ValyuService(BaseService):
     def _warm_up(self, sess):
         """访问 platform.valyu.ai/auth，让 Cloudflare 设置访客 cookie。"""
         try:
-            sess.get(f"{PLATFORM_URL}/auth", headers=_NAV_HEADERS, timeout=15)
+            r = sess.get(f"{PLATFORM_URL}/auth", headers=_NAV_HEADERS, timeout=15)
+            self._log("step1", f"status={r.status_code}, cookies={list(sess.cookies.keys())}")
         except Exception as e:
             print(f"[valyu] Warm-up warning: {e}")
 
@@ -243,6 +250,7 @@ class ValyuService(BaseService):
                 headers=headers,
                 timeout=30,
             )
+            self._log("step3", f"status={r.status_code}, resp={r.text[:300]!r}")
         except Exception as e:
             print(f"[valyu] Onboarding POST failed: {e}")
             return False
@@ -261,6 +269,7 @@ class ValyuService(BaseService):
                 headers=_SUPABASE_HEADERS,
                 timeout=20,
             )
+            self._log("step3_supa", f"status={r.status_code}, resp={r.text[:300]!r}")
         except Exception as e:
             print(f"[valyu] Supabase signup request failed: {e}")
             return False
@@ -320,6 +329,7 @@ class ValyuService(BaseService):
                 headers=_SUPABASE_HEADERS,
                 timeout=20,
             )
+            self._log("step6", f"status={r.status_code}, resp={r.text[:200]!r}")
         except Exception as e:
             print(f"[valyu] Password login request failed: {e}")
             return None
@@ -356,6 +366,7 @@ class ValyuService(BaseService):
                 headers=headers,
                 timeout=20,
             )
+            self._log("step7_get", f"status={r.status_code}, html_len={len(r.text)}")
         except Exception as e:
             print(f"[valyu] Failed to fetch API keys page: {e}")
             return None
@@ -390,6 +401,7 @@ class ValyuService(BaseService):
                 },
                 timeout=30,
             )
+            self._log("step7_create", f"status={create_resp.status_code}, resp={create_resp.text[:200]!r}")
         except Exception as e:
             print(f"[valyu] Server Action POST failed: {e}")
             return None
