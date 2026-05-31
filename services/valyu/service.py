@@ -29,6 +29,24 @@ SUPABASE_URL = "https://auth.valyu.ai"
 SUPABASE_ANON_KEY = "sb_publishable_8AbrTfadTWE6iBwyjzK2TA_mJJbL0G6"
 PLATFORM_URL = "https://platform.valyu.ai"
 _FALLBACK_ACTION_ID = "4049b0f006c0cc849cd70fb479842ca0d4c4bbade9"
+
+
+def _extract_action_id_pattern1(html):
+    """Extract action ID from $ACTION_1:0 wrapper containing nested JSON with "id" field."""
+    m0 = re.search(r'name="\$ACTION_1:0" value="([^"]+)"', html)
+    if not m0:
+        return None
+    mid = re.search(r'"id"\s*:\s*"([0-9a-f]{40,})"', _html_mod.unescape(m0.group(1)))
+    return mid.group(1) if mid else None
+
+
+def _extract_action_id_pattern2(html):
+    """Extract action ID from direct "id" field in HTML (no outer $ACTION_1:0 wrapper)."""
+    m = re.search(r'"id"\s*:\s*"([0-9a-f]{40,})"', html)
+    return m.group(1) if m else None
+
+
+_ACTION_ID_PATTERNS = (_extract_action_id_pattern1, _extract_action_id_pattern2)
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 _VALYU_KEY_RE = re.compile(r'val[a-z_]*[A-Za-z0-9_-]{20,}')
 
@@ -182,18 +200,15 @@ class ValyuService(BaseService):
         except Exception as e:
             print(f"[valyu] Failed to fetch onboarding page: {e}")
 
-        # 从 HTML 动态提取 next-action hash
-        m0 = re.search(r'name="\$ACTION_1:0" value="([^"]+)"', html)
-        mid = re.search(
-            r'"id"\s*:\s*"([0-9a-f]{40,})"',
-            _html_mod.unescape(m0.group(1)) if m0 else "",
-        )
-
-        if mid:
-            action_id = mid.group(1)
-        else:
+        # 从 HTML 动态提取 next-action hash（多 pattern 按序尝试）
+        action_id = None
+        for _pattern_fn in _ACTION_ID_PATTERNS:
+            action_id = _pattern_fn(html)
+            if action_id:
+                break
+        if not action_id:
             action_id = _FALLBACK_ACTION_ID
-            print("[valyu] WARNING: using fallback next-action ID")
+            self._log("step2", f"WARNING: using fallback next-action ID, html_snippet={html[:300]!r}")
 
         return html, action_id
 
@@ -346,27 +361,47 @@ class ValyuService(BaseService):
         return (True, None)
 
     def _password_login(self, sess, email, password):
-        try:
-            r = sess.post(
-                f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-                json={"email": email, "password": password},
-                headers=_SUPABASE_HEADERS,
-                timeout=20,
-            )
-            self._log("step6", f"status={r.status_code}, resp={r.text[:200]!r}")
-        except Exception as e:
-            print(f"[valyu] Password login request failed: {e}")
+        # error_code field: verified from live response {"code":400,"error_code":"email_not_confirmed","msg":"Email not confirmed"}
+        max_attempts = 4
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                wait = 3 * attempt  # 3s, 6s, 9s
+                self._log("step6", f"retry #{attempt} in {wait}s (email_not_confirmed)")
+                time.sleep(wait)
+            try:
+                r = sess.post(
+                    f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+                    json={"email": email, "password": password},
+                    headers=_SUPABASE_HEADERS,
+                    timeout=20,
+                )
+                self._log("step6", f"attempt={attempt}, status={r.status_code}, resp={r.text[:200]!r}")
+            except Exception as e:
+                print(f"[valyu] Password login request failed: {e}")
+                return None
+
+            if r.status_code == 200:
+                data = r.json()
+                token = data.get("access_token")
+                if token:
+                    return token
+                print(f"[valyu] Login response missing access_token: {r.text[:200]}")
+                return None
+
+            # Retry only on email_not_confirmed
+            try:
+                error_code = r.json().get("error_code")
+            except Exception:
+                error_code = None
+
+            if r.status_code == 400 and error_code == "email_not_confirmed":
+                continue
+
+            # Non-retryable error
+            print(f"[valyu] Password login failed ({r.status_code}): {r.text[:200]}")
             return None
 
-        if r.status_code == 200:
-            data = r.json()
-            token = data.get("access_token")
-            if token:
-                return token
-            print(f"[valyu] Login response missing access_token: {r.text[:200]}")
-            return None
-
-        print(f"[valyu] Password login failed ({r.status_code}): {r.text[:200]}")
+        self._log("step6", f"FAIL: email still not confirmed after {max_attempts} attempts")
         return None
 
     # ------------------------------------------------------------------
@@ -399,12 +434,14 @@ class ValyuService(BaseService):
         if api_key:
             return api_key
 
-        m0 = re.search(r'name="\$ACTION_1:0" value="([^"]+)"', r.text)
-        mid = re.search(
-            r'"id"\s*:\s*"([0-9a-f]{40,})"',
-            _html_mod.unescape(m0.group(1)) if m0 else "",
-        )
-        action_id = mid.group(1) if mid else _FALLBACK_ACTION_ID
+        action_id = None
+        for _pattern_fn in _ACTION_ID_PATTERNS:
+            action_id = _pattern_fn(r.text)
+            if action_id:
+                break
+        if not action_id:
+            action_id = _FALLBACK_ACTION_ID
+            self._log("step7_create", f"WARNING: using fallback next-action ID, html_snippet={r.text[:300]!r}")
 
         key_name = f"auto-key-{int(time.time())}"
         try:
@@ -477,11 +514,29 @@ class ValyuService(BaseService):
                 page = browser.new_page()
 
                 # Step 1: open signup page
-                page.goto(f"{PLATFORM_URL}/auth", wait_until="domcontentloaded", timeout=30000)
+                page.goto(f"{PLATFORM_URL}/auth", wait_until="networkidle", timeout=45000)
                 time.sleep(2)
 
                 # Step 2: enter email and proceed to onboarding
-                page.fill('input[placeholder="name@example.com"]', email)
+                email_selectors = [
+                    'input[placeholder="name@example.com"]',
+                    'input[type="email"]',
+                    'input[name="email"]',
+                    'input[autocomplete="email"]',
+                ]
+                filled = False
+                for sel in email_selectors:
+                    try:
+                        page.wait_for_selector(sel, timeout=8000, state="visible")
+                        page.fill(sel, email)
+                        filled = True
+                        self._log("browser", f"email filled via selector: {sel}")
+                        break
+                    except Exception:
+                        continue
+                if not filled:
+                    self._log("browser", "FAIL: no email input found with any selector")
+                    return None
                 page.click('button:has-text("Continue with Email")')
                 page.wait_for_url("**/onboarding**", timeout=15000)
 
