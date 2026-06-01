@@ -26,6 +26,8 @@ from services.base import BaseService
 # 常量
 SUPABASE_URL = "https://auth.valyu.ai"
 SUPABASE_ANON_KEY = "sb_publishable_8AbrTfadTWE6iBwyjzK2TA_mJJbL0G6"
+SUPABASE_PROJECT_REF = "znjddttyhmtuiyavinsb"  # from JWT iss field
+SUPABASE_REST_URL = f"https://{SUPABASE_PROJECT_REF}.supabase.co/rest/v1"
 PLATFORM_URL = "https://platform.valyu.ai"
 _FALLBACK_ACTION_ID = "4049b0f006c0cc849cd70fb479842ca0d4c4bbade9"
 
@@ -141,15 +143,18 @@ class ValyuService(BaseService):
                 print("[valyu] Step 4 failed: verification email not received, falling back to browser")
                 return self._browser_fallback(email, password)
 
-            # Step 5: 访问验证链接，失败直接 fallback（warn-and-continue 会导致 Step 6 email_not_confirmed）
-            # _access_token_from_verify 当前恒为 None（Supabase 使用 URL fragment，requests 无法获取）
-            verify_ok, _access_token_from_verify = self._verify_via_link(sess, verify_link)
+            # Step 5: 访问验证链接并手动调用 Supabase verify，直接拿到 access_token
+            verify_ok, access_token_from_verify = self._verify_via_link(sess, verify_link)
             if not verify_ok:
                 print("[valyu] Step 5 failed: verify link did not land on platform, falling back to browser")
                 return self._browser_fallback(email, password)
 
-            # Step 6: 密码登录获取 access_token
-            access_token = self._password_login(sess, email, password)
+            # Step 6: 密码登录获取 access_token（若 step5 已返回 token 则跳过）
+            if access_token_from_verify:
+                access_token = access_token_from_verify
+                self._log("step6", "skipped: access_token obtained from step5 verify")
+            else:
+                access_token = self._password_login(sess, email, password)
             if not access_token:
                 print("[valyu] Step 6 failed: password login failed, falling back to browser")
                 return self._browser_fallback(email, password)
@@ -158,7 +163,7 @@ class ValyuService(BaseService):
             api_key = self._fetch_api_key_http(sess, access_token)
             if not api_key:
                 print("[valyu] Step 7 failed: could not obtain API key via HTTP, falling back to browser")
-                return self._browser_fallback(email, password)
+                return self._browser_fallback(email, password, access_token=access_token)
 
             # Step 8: 验证并保存
             self._do_post_verify(api_key)
@@ -322,11 +327,14 @@ class ValyuService(BaseService):
         return link
 
     def _verify_via_link(self, sess, link):
-        """Follow verify link, log redirect chain, detect error params.
+        """Follow verify link, log redirect chain, then manually call Supabase verify API.
 
-        Returns (bool, None) — access_token extraction reserved for future:
-        Supabase uses URL fragment which requests cannot access.
+        /auth/confirm?token_hash=... is a Next.js frontend page that requires JS to POST
+        to Supabase. We extract token_hash and call the API directly instead.
+        Returns (bool, access_token_or_None).
         """
+        import urllib.parse as _urlparse
+
         try:
             r = sess.get(link, headers=_NAV_HEADERS, allow_redirects=True, timeout=60)
         except Exception as e:
@@ -344,20 +352,43 @@ class ValyuService(BaseService):
         self._log("step5", f"final_url={final_url[:120]!r}")
 
         # Detect error query params
-        import urllib.parse as _urlparse
         qs = _urlparse.parse_qs(_urlparse.urlparse(final_url).query)
         if "error" in qs or "error_code" in qs:
             err = qs.get("error", qs.get("error_code", []))[0]
             self._log("step5", f"FAIL: error param detected: {err!r}")
             return (False, None)
 
-        time.sleep(2)
-
         if r.status_code not in range(200, 400) or "platform.valyu.ai" not in final_url.lower():
             print(f"[valyu] WARNING: verify link may have failed (status={r.status_code}, url={r.url})")
             return (False, None)
 
-        return (True, None)
+        # /auth/confirm?token_hash=... is a JS-driven page; requests cannot execute JS.
+        # Extract token_hash and call Supabase verify endpoint directly.
+        token_hash = qs.get("token_hash", [None])[0]
+        verify_type = qs.get("type", ["signup"])[0]
+
+        if not token_hash:
+            self._log("step5", "WARNING: no token_hash in final_url, assuming pre-confirmed")
+            return (True, None)
+
+        try:
+            vr = sess.post(
+                f"{SUPABASE_URL}/auth/v1/verify",
+                json={"token_hash": token_hash, "type": verify_type},
+                headers=_SUPABASE_HEADERS,
+                timeout=20,
+            )
+            self._log("step5_verify", f"status={vr.status_code}, resp={vr.text[:200]!r}")
+        except Exception as e:
+            print(f"[valyu] Supabase verify request failed: {e}")
+            return (False, None)
+
+        if vr.status_code == 200:
+            access_token = vr.json().get("access_token")
+            return (True, access_token)
+
+        self._log("step5_verify", f"FAIL: status={vr.status_code}")
+        return (False, None)
 
     def _password_login(self, sess, email, password):
         # error_code field: verified from live response {"code":400,"error_code":"email_not_confirmed","msg":"Email not confirmed"}
@@ -411,7 +442,54 @@ class ValyuService(BaseService):
         matches = _VALYU_KEY_RE.findall(text)
         return matches[0] if matches else None
 
+    def _fetch_existing_key_rest(self, access_token):
+        """Try to read an existing API key from Supabase PostgREST (SELECT is allowed by RLS).
+
+        Valyu stores api_keys in a Supabase table with RLS: users can SELECT their own rows.
+        INSERT/UPDATE is blocked, so this only works if a key already exists.
+        Returns the key string or None.
+        """
+        try:
+            import requests as _req
+            r = _req.get(
+                f"{SUPABASE_REST_URL}/api_keys",
+                params={"select": "*", "limit": "1"},
+                headers={
+                    "apikey": SUPABASE_ANON_KEY,
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/json",
+                    "user-agent": _UA,
+                },
+                timeout=15,
+            )
+            self._log("step7_rest", f"status={r.status_code}, resp={r.text[:200]!r}")
+            if r.status_code == 200:
+                rows = r.json()
+                if rows:
+                    # Look for a key value in common column names
+                    row = rows[0]
+                    for col in ("api_key", "key", "value", "token", "secret"):
+                        val = row.get(col)
+                        if val and self._extract_valyu_key(str(val)):
+                            return self._extract_valyu_key(str(val))
+                    # Try all string values in the row
+                    for val in row.values():
+                        if isinstance(val, str):
+                            k = self._extract_valyu_key(val)
+                            if k:
+                                return k
+        except Exception as e:
+            self._log("step7_rest", f"ERROR: {e}")
+        return None
+
     def _fetch_api_key_http(self, sess, access_token):
+        # First try reading an existing key via Supabase REST API (fast, no Server Action needed)
+        existing = self._fetch_existing_key_rest(access_token)
+        if existing:
+            self._log("step7", "obtained existing key via Supabase REST")
+            return existing
+
+        # Fall back to Server Action (requires a valid action ID from SSR, usually fails without browser)
         headers = {
             **_NAV_HEADERS,
             "Authorization": f"Bearer {access_token}",
@@ -501,8 +579,17 @@ class ValyuService(BaseService):
     # 浏览器 fallback (Task 5)
     # ------------------------------------------------------------------
 
-    def _browser_fallback(self, email, password):
-        """Patchright browser completes full 11-step onboarding (final fallback when HTTP chain fails)."""
+    def _browser_fallback(self, email, password, access_token=None):
+        """Patchright browser completes onboarding and extracts API key.
+
+        If access_token is provided (HTTP flow already registered+verified the account),
+        inject the session cookie directly and skip the registration flow entirely —
+        just complete onboarding and navigate to the API keys page.
+        Otherwise fall back to full registration flow.
+        """
+        import json as _json
+        import urllib.parse as _urlparse
+
         try:
             first_name = random.choice(_FIRST_NAMES)
             last_name = random.choice(_LAST_NAMES)
@@ -512,101 +599,85 @@ class ValyuService(BaseService):
             try:
                 page = browser.new_page()
 
-                # Step 1: open signup page
-                page.goto(f"{PLATFORM_URL}/auth", wait_until="networkidle", timeout=45000)
-                time.sleep(2)
+                if access_token:
+                    # Fast path: inject Supabase session cookie and go straight to the platform
+                    self._log("browser", "access_token available — injecting session cookie, skipping signup")
+                    session_data = _json.dumps({
+                        "access_token": access_token,
+                        "token_type": "bearer",
+                        "expires_in": 3600,
+                        "refresh_token": "",
+                    })
+                    # @supabase/ssr splits large values into .0/.1 chunks; inject both formats
+                    cookie_name = f"sb-{SUPABASE_PROJECT_REF}-auth-token"
+                    page.context.add_cookies([{
+                        "name": cookie_name,
+                        "value": session_data,
+                        "domain": "platform.valyu.ai",
+                        "path": "/",
+                    }])
+                    # Also set the URL-encoded variant some Next.js Supabase helpers use
+                    page.context.add_cookies([{
+                        "name": cookie_name,
+                        "value": _urlparse.quote(session_data),
+                        "domain": "platform.valyu.ai",
+                        "path": "/",
+                    }])
 
-                # Step 2: enter email and proceed to onboarding
-                email_selectors = [
-                    'input[placeholder="name@example.com"]',
-                    'input[type="email"]',
-                    'input[name="email"]',
-                    'input[autocomplete="email"]',
-                ]
-                filled = False
-                for sel in email_selectors:
-                    try:
-                        page.wait_for_selector(sel, timeout=8000, state="visible")
-                        page.fill(sel, email)
-                        filled = True
-                        self._log("browser", f"email filled via selector: {sel}")
-                        break
-                    except Exception:
-                        continue
-                if not filled:
-                    self._log("browser", "FAIL: no email input found with any selector")
-                    return None
-                page.click('button:has-text("Continue with Email")')
-                page.wait_for_url("**/onboarding**", timeout=15000)
+                    page.goto(f"{PLATFORM_URL}/user/account/apikeys",
+                              wait_until="domcontentloaded", timeout=45000)
+                    time.sleep(4)
 
-                # Step 3: fill firstName and lastName
-                page.fill('input[name="firstName"]', first_name)
-                page.fill('input[name="lastName"]', last_name)
+                    # If redirected to onboarding, complete it
+                    if "onboarding" in page.url:
+                        self._log("browser", "redirected to onboarding — completing it")
+                        self._complete_onboarding(page, first_name, last_name, password)
+                        page.goto(f"{PLATFORM_URL}/user/account/apikeys",
+                                  wait_until="domcontentloaded", timeout=30000)
+                        time.sleep(3)
+                    # If redirected to auth, session cookie wasn't accepted; fall through to full signup
+                    elif "auth" in page.url and "apikeys" not in page.url:
+                        self._log("browser", "cookie injection failed (redirected to /auth) — falling back to full signup")
+                        access_token = None  # trigger full flow below
 
-                # Step 4: enable password mode
-                page.locator('button[role="switch"]:near(:text("Use password"))').click()
-                page.wait_for_selector('input[type="password"]', timeout=5000)
+                if not access_token:
+                    # Full registration flow
+                    page.goto(f"{PLATFORM_URL}/auth", wait_until="domcontentloaded", timeout=45000)
+                    time.sleep(2)
 
-                # Step 5: fill password fields
-                page.locator('input[type="password"]').nth(0).fill(password)
-                page.locator('input[type="password"]').nth(1).fill(password)
+                    email_selectors = [
+                        'input[placeholder="name@example.com"]',
+                        'input[type="email"]',
+                        'input[name="email"]',
+                        'input[autocomplete="email"]',
+                    ]
+                    filled = False
+                    for sel in email_selectors:
+                        try:
+                            page.wait_for_selector(sel, timeout=8000, state="visible")
+                            page.fill(sel, email)
+                            filled = True
+                            self._log("browser", f"email filled via selector: {sel}")
+                            break
+                        except Exception:
+                            continue
+                    if not filled:
+                        self._log("browser", "FAIL: no email input found with any selector")
+                        return None
+                    page.click('button:has-text("Continue with Email")')
+                    page.wait_for_url("**/onboarding**", timeout=15000)
 
-                # Step 6: click Continue
-                page.click('button:has-text("Continue"):not([disabled])')
-                time.sleep(1)
+                    self._complete_onboarding(page, first_name, last_name, password)
 
-                # Step 7: select platform Developer
-                page.click('button:has-text("Developer")')
-                page.click('button:has-text("Continue"):not([disabled])')
-                time.sleep(0.5)
+                    # wait for verification email
+                    verify_link = self._wait_and_verify_email(email)
+                    if verify_link:
+                        page.goto(verify_link, wait_until="domcontentloaded", timeout=60000)
+                        time.sleep(5)
 
-                # Step 8: select source (random)
-                source = random.choice(["LinkedIn", "Twitter/X", "Reddit", "Search Engine", "GitHub"])
-                page.locator(f'button:has-text("{source}")').click()
-                page.click('button:has-text("Continue"):not([disabled])')
-                time.sleep(0.5)
-
-                # Step 9: select role (random)
-                role = random.choice(["AI Developer", "Founder/CTO", "Vibe Coder", "Researcher"])
-                page.locator(f'button:has-text("{role}")').click()
-                page.click('button:has-text("Continue"):not([disabled])')
-                time.sleep(0.5)
-
-                # Step 10: select industry Technology
-                page.click('button:has-text("Technology")')
-                page.click('button:has-text("Continue"):not([disabled])')
-                time.sleep(0.5)
-
-                # Step 11: select technology (random) + finish setup
-                tech = random.choice(["MCP", "OpenAI SDK", "LangChain", "AI SDK"])
-                page.locator(f'button:has-text("{tech}")').click()
-                page.click('button:has-text("Continue"):not([disabled])')
-                time.sleep(1)
-
-                # handle scroll-to-bottom and checkbox
-                scroll_btn = page.locator('button:has-text("Scroll to bottom")')
-                if scroll_btn.is_visible():
-                    scroll_btn.click()
-                    time.sleep(0.5)
-
-                checkbox = page.locator('input[type="checkbox"], [role="checkbox"]')
-                try:
-                    checkbox.click()
-                except Exception:
-                    pass
-
-                page.click('button:has-text("Finish setup")')
-                time.sleep(3)
-
-                # wait for verification email
-                verify_link = self._wait_and_verify_email(email)
-                if verify_link:
-                    page.goto(verify_link, wait_until="domcontentloaded", timeout=60000)
-                    time.sleep(5)
-
-                # navigate to API keys page
-                page.goto(f"{PLATFORM_URL}/user/account/apikeys", wait_until="domcontentloaded", timeout=30000)
-                time.sleep(3)
+                    page.goto(f"{PLATFORM_URL}/user/account/apikeys",
+                              wait_until="domcontentloaded", timeout=30000)
+                    time.sleep(3)
 
                 # extract key from page
                 html = page.content()
@@ -640,6 +711,60 @@ class ValyuService(BaseService):
         except Exception as e:
             print(f"[valyu] Browser fallback failed: {e}")
             return None
+
+    def _complete_onboarding(self, page, first_name, last_name, password):
+        """Fill the multi-step onboarding form (steps 3-11 of the browser flow)."""
+        # fill name fields
+        page.fill('input[name="firstName"]', first_name)
+        page.fill('input[name="lastName"]', last_name)
+
+        # enable password mode if toggle exists
+        try:
+            page.locator('button[role="switch"]:near(:text("Use password"))').click(timeout=3000)
+            page.wait_for_selector('input[type="password"]', timeout=5000)
+            page.locator('input[type="password"]').nth(0).fill(password)
+            page.locator('input[type="password"]').nth(1).fill(password)
+        except Exception:
+            pass
+
+        page.click('button:has-text("Continue"):not([disabled])')
+        time.sleep(1)
+
+        page.click('button:has-text("Developer")')
+        page.click('button:has-text("Continue"):not([disabled])')
+        time.sleep(0.5)
+
+        source = random.choice(["LinkedIn", "Twitter/X", "Reddit", "Search Engine", "GitHub"])
+        page.locator(f'button:has-text("{source}")').click()
+        page.click('button:has-text("Continue"):not([disabled])')
+        time.sleep(0.5)
+
+        role = random.choice(["AI Developer", "Founder/CTO", "Vibe Coder", "Researcher"])
+        page.locator(f'button:has-text("{role}")').click()
+        page.click('button:has-text("Continue"):not([disabled])')
+        time.sleep(0.5)
+
+        page.click('button:has-text("Technology")')
+        page.click('button:has-text("Continue"):not([disabled])')
+        time.sleep(0.5)
+
+        tech = random.choice(["MCP", "OpenAI SDK", "LangChain", "AI SDK"])
+        page.locator(f'button:has-text("{tech}")').click()
+        page.click('button:has-text("Continue"):not([disabled])')
+        time.sleep(1)
+
+        scroll_btn = page.locator('button:has-text("Scroll to bottom")')
+        if scroll_btn.is_visible():
+            scroll_btn.click()
+            time.sleep(0.5)
+
+        try:
+            page.locator('input[type="checkbox"], [role="checkbox"]').click()
+        except Exception:
+            pass
+
+        page.click('button:has-text("Finish setup")')
+        time.sleep(3)
 
     # ------------------------------------------------------------------
     # Abstract method stubs (Task 5)
